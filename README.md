@@ -69,10 +69,23 @@ that exports them before invoking `uv`.
 ```sh
 uv run ruff check .      # lint
 uv run ty check          # type check
-uv run pytest            # unit + integration tests
+uv run pytest            # unit + integration tests, with coverage
 uv run pytest -m "not integration"  # unit tests only (no network)
 ```
 
 Integration tests hit the real ESPN and NWS APIs (no credentials needed) but
 never post to Bluesky — they use a console-printing poster instead. They run
 in CI on every push and pull request via GitHub Actions.
+
+### Code coverage
+
+`pytest` runs with [`pytest-cov`](https://pytest-cov.readthedocs.io/) enabled
+by default (see `[tool.pytest.ini_options]` / `[tool.coverage.*]` in
+`pyproject.toml`), printing a per-file report and failing if total coverage
+drops below 80%. CI also writes `coverage.xml` and uploads it as a build
+artifact. For a browsable HTML report locally:
+
+```sh
+uv run pytest --cov-report=html
+open htmlcov/index.html
+```
