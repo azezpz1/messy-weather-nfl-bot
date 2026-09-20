@@ -1,4 +1,4 @@
-# messy-weather-nfl-bot
+# messy-weather-sports-bot
 
 A bot to post messy NFL weather games to various social media sites
 
