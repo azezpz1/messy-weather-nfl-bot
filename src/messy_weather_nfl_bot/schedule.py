@@ -75,6 +75,9 @@ def get_todays_games(
 
     games: list[Game] = []
     for event in events:
+        if not isinstance(event, dict):
+            kind = type(event).__name__
+            raise ValueError(f"Unexpected ESPN scoreboard event shape: expected object, got {kind}")
         competitions = event.get("competitions") or []
         if not competitions:
             continue

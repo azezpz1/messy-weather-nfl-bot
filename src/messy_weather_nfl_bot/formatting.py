@@ -41,6 +41,11 @@ def build_post_texts(
     # Reserve room for the header so it always fits alongside at least one game line -
     # otherwise a single oversized line could force a header-only first post.
     line_budget = max_length - len(header) - 1
+    if line_budget < 1:
+        raise ValueError(
+            f"max_length={max_length} is too small to fit the header ({len(header)} chars) "
+            "plus at least one game line"
+        )
     lines = [_truncate(format_game_line(gw), line_budget) for gw in games]
 
     chunks: list[str] = []

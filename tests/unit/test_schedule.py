@@ -132,3 +132,10 @@ def test_malformed_events_shape_raises() -> None:
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": "oops"}))
     with pytest.raises(ValueError, match="expected a list"):
         get_todays_games(TARGET_DATE)
+
+
+@respx.mock
+def test_non_object_event_item_raises() -> None:
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": ["oops"]}))
+    with pytest.raises(ValueError, match="expected object"):
+        get_todays_games(TARGET_DATE)

@@ -1,5 +1,7 @@
 import datetime as dt
 
+import pytest
+
 from messy_weather_nfl_bot.formatting import build_post_texts, format_game_line
 from messy_weather_nfl_bot.messiness import evaluate_game
 from messy_weather_nfl_bot.schedule import Game
@@ -40,6 +42,12 @@ def test_format_game_line_omits_wind_when_calm() -> None:
 
 def test_build_post_texts_empty_games_returns_no_posts() -> None:
     assert build_post_texts([], GAME_DATE) == []
+
+
+def test_build_post_texts_rejects_max_length_too_small_for_header() -> None:
+    games = [make_game_weather("GB", "CHI", "Snow")]
+    with pytest.raises(ValueError, match="too small"):
+        build_post_texts(games, GAME_DATE, max_length=5)
 
 
 def test_build_post_texts_single_game_fits_in_one_post() -> None:
