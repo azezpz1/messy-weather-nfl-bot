@@ -1,0 +1,44 @@
+[project]
+name = "messy-weather-nfl-bot"
+version = "0.1.0"
+description = "Posts messy NFL game-day weather to social media"
+authors = [
+    { name = "Anthony Panettiere" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "atproto>=0.0.72",
+    "httpx>=0.28.1",
+]
+
+[project.scripts]
+messy-weather-nfl-bot = "messy_weather_nfl_bot.main:main"
+
+[build-system]
+requires = ["uv_build>=0.8.17,<0.9.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-mock>=3.15.1",
+    "respx>=0.23.1",
+    "ruff>=0.16.8",
+    "ty>=0.0.82",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: exercises real external APIs (network required)",
+]

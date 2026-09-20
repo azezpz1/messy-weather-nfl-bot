@@ -1,2 +1,77 @@
 # messy-weather-nfl-bot
+
 A bot to post messy NFL weather games to various social media sites
+
+On the morning of NFL game days, this bot checks the forecast for every outdoor
+stadium hosting a game that day, ranks them by how messy the weather looks
+(snow first, then by a combined score of wind, precipitation odds, and
+temperature extremes), and posts a weather report — currently to
+[Bluesky](https://bsky.app), with a clean abstraction to add more platforms
+later.
+
+Games in domed, fixed-roof, or retractable-roof stadiums are skipped, since
+roof status isn't reliably knowable ahead of time. If there are no outdoor
+games that day, the bot posts nothing.
+
+## Setup
+
+Requires [uv](https://docs.astral.sh/uv/).
+
+```sh
+uv sync
+```
+
+## Configuration
+
+The schedule (ESPN) and weather (National Weather Service) APIs are free and
+require no credentials. Posting to Bluesky needs an
+[app password](https://bsky.app/settings/app-passwords), set via environment
+variables:
+
+| Env var                 | Description                                   |
+| ------------------------ | ---------------------------------------------- |
+| `BLUESKY_HANDLE`         | Your Bluesky handle, e.g. `example.bsky.social` |
+| `BLUESKY_APP_PASSWORD`   | An app password (not your account password)     |
+
+## Running
+
+```sh
+# Preview what would be posted today, without posting anywhere:
+uv run messy-weather-nfl-bot --dry-run
+
+# Post for real (requires BLUESKY_HANDLE / BLUESKY_APP_PASSWORD):
+uv run messy-weather-nfl-bot
+
+# Post to multiple platforms at once (as more are added):
+uv run messy-weather-nfl-bot --platforms bluesky
+```
+
+## Running on a schedule (e.g. a Raspberry Pi)
+
+This script doesn't schedule itself — run it via cron (or any scheduler) on
+game mornings. It's a no-op (exits cleanly, posts nothing) on days with no
+outdoor NFL games, so it's safe to run daily if you'd rather not maintain a
+precise NFL schedule in your crontab. A typical crontab entry, run at 9am on
+Thursdays, Sundays, and Mondays:
+
+```cron
+# m h  dom mon dow          command
+0  9   *   *   0,1,4        cd /path/to/messy-weather-nfl-bot && uv run messy-weather-nfl-bot
+```
+
+Set `BLUESKY_HANDLE` and `BLUESKY_APP_PASSWORD` in the environment the cron
+job runs in (e.g. via a `.env` loaded by your shell profile, or directly in
+the crontab).
+
+## Development
+
+```sh
+uv run ruff check .      # lint
+uv run ty check          # type check
+uv run pytest            # unit + integration tests
+uv run pytest -m "not integration"  # unit tests only (no network)
+```
+
+Integration tests hit the real ESPN and NWS APIs (no credentials needed) but
+never post to Bluesky — they use a console-printing poster instead. They run
+in CI on every push and pull request via GitHub Actions.
