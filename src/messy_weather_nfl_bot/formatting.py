@@ -24,6 +24,12 @@ def format_header(date: dt.date) -> str:
     return f"\U0001f329️ NFL Weather Report — {date:%a %b} {date.day}"
 
 
+def _truncate(text: str, max_length: int) -> str:
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 1].rstrip() + "…"
+
+
 def build_post_texts(
     games: list[GameWeather], date: dt.date, max_length: int = MAX_POST_LENGTH
 ) -> list[str]:
@@ -31,15 +37,19 @@ def build_post_texts(
     if not games:
         return []
 
-    lines = [format_game_line(gw) for gw in games]
+    header = format_header(date)
+    # Reserve room for the header so it always fits alongside at least one game line -
+    # otherwise a single oversized line could force a header-only first post.
+    line_budget = max_length - len(header) - 1
+    lines = [_truncate(format_game_line(gw), line_budget) for gw in games]
 
     chunks: list[str] = []
-    current: list[str] = [format_header(date)]
-    current_length = len(current[0])
+    current: list[str] = [header]
+    current_length = len(header)
 
     for line in lines:
         addition = len(line) + 1  # + newline joining it to the chunk
-        if current and current_length + addition > max_length:
+        if current_length + addition > max_length:
             chunks.append("\n".join(current))
             current = [line]
             current_length = len(line)
@@ -47,7 +57,6 @@ def build_post_texts(
             current.append(line)
             current_length += addition
 
-    if current:
-        chunks.append("\n".join(current))
+    chunks.append("\n".join(current))
 
     return chunks

@@ -56,7 +56,7 @@ def run(platform_names: list[str], dry_run: bool) -> int:
     evaluated = []
     for game in candidates:
         assert game.stadium is not None  # guaranteed by outdoor_games()
-        forecast = get_forecast(game.stadium.latitude, game.stadium.longitude)
+        forecast = get_forecast(game.stadium.latitude, game.stadium.longitude, game.kickoff)
         evaluated.append(evaluate_game(game, forecast))
     ranked = sort_by_messiness(evaluated)
 

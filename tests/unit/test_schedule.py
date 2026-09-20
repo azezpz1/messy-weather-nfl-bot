@@ -1,6 +1,7 @@
 import datetime as dt
 
 import httpx
+import pytest
 import respx
 
 from messy_weather_nfl_bot.schedule import SCOREBOARD_URL, get_todays_games, outdoor_games
@@ -111,3 +112,23 @@ def test_events_outside_target_date_are_excluded() -> None:
 def test_no_games_returns_empty_list() -> None:
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
     assert get_todays_games(TARGET_DATE) == []
+
+
+@respx.mock
+def test_missing_events_key_is_treated_as_no_games() -> None:
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={}))
+    assert get_todays_games(TARGET_DATE) == []
+
+
+@respx.mock
+def test_non_object_payload_raises() -> None:
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=["not", "an", "object"]))
+    with pytest.raises(ValueError, match="expected object"):
+        get_todays_games(TARGET_DATE)
+
+
+@respx.mock
+def test_malformed_events_shape_raises() -> None:
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": "oops"}))
+    with pytest.raises(ValueError, match="expected a list"):
+        get_todays_games(TARGET_DATE)

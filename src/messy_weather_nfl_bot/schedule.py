@@ -65,8 +65,16 @@ def get_todays_games(
         if owns_client:
             http_client.close()
 
+    if not isinstance(payload, dict):
+        kind = type(payload).__name__
+        raise ValueError(f"Unexpected ESPN scoreboard response shape: expected object, got {kind}")
+    events = payload.get("events", [])
+    if not isinstance(events, list):
+        kind = type(events).__name__
+        raise ValueError(f"Unexpected ESPN scoreboard 'events' shape: expected a list, got {kind}")
+
     games: list[Game] = []
-    for event in payload.get("events", []):
+    for event in events:
         competitions = event.get("competitions") or []
         if not competitions:
             continue

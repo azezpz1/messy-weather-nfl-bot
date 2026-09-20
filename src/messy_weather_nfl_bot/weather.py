@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 from dataclasses import dataclass
 
@@ -36,8 +37,13 @@ def _parse_wind_speed_mph(wind_speed: str) -> float:
     return float(high or low)
 
 
-def _pick_period(periods: list[dict]) -> dict:
-    """Pick the forecast period the bot should report: the soonest daytime period."""
+def _pick_period(periods: list[dict], kickoff: dt.datetime) -> dict:
+    """Pick the forecast period covering kickoff, falling back to the soonest daytime period."""
+    for period in periods:
+        start = dt.datetime.fromisoformat(period["startTime"])
+        end = dt.datetime.fromisoformat(period["endTime"])
+        if start <= kickoff < end:
+            return period
     for period in periods:
         if period.get("isDaytime"):
             return period
@@ -45,9 +51,12 @@ def _pick_period(periods: list[dict]) -> dict:
 
 
 def get_forecast(
-    latitude: float, longitude: float, client: httpx.Client | None = None
+    latitude: float,
+    longitude: float,
+    kickoff: dt.datetime,
+    client: httpx.Client | None = None,
 ) -> WeatherReport:
-    """Fetch the forecast for the given coordinates for the nearest upcoming daytime period."""
+    """Fetch the forecast for the given coordinates covering the game's kickoff time."""
     owns_client = client is None
     http_client = client or httpx.Client(timeout=10.0, headers={"User-Agent": USER_AGENT})
     try:
@@ -62,7 +71,7 @@ def get_forecast(
         if owns_client:
             http_client.close()
 
-    period = _pick_period(periods)
+    period = _pick_period(periods, kickoff)
     precip = period.get("probabilityOfPrecipitation", {}) or {}
 
     return WeatherReport(

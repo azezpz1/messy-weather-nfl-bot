@@ -59,9 +59,10 @@ Thursdays, Sundays, and Mondays:
 0  9   *   *   0,1,4        cd /path/to/messy-weather-nfl-bot && uv run messy-weather-nfl-bot
 ```
 
-Set `BLUESKY_HANDLE` and `BLUESKY_APP_PASSWORD` in the environment the cron
-job runs in (e.g. via a `.env` loaded by your shell profile, or directly in
-the crontab).
+Cron does not load your shell profile or `.env` files automatically, so
+`BLUESKY_HANDLE` and `BLUESKY_APP_PASSWORD` won't be set unless you provide
+them explicitly: set them directly in the crontab, or in a wrapper script
+that exports them before invoking `uv`.
 
 ## Development
 

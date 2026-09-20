@@ -64,3 +64,16 @@ def test_build_post_texts_splits_into_thread_when_too_long() -> None:
     combined = "\n".join(texts)
     for gw in games:
         assert gw.game.home_team in combined
+
+
+def test_build_post_texts_truncates_an_oversized_single_line_and_keeps_header() -> None:
+    absurdly_long_forecast = "Chance Of Rain " * 40  # far longer than the post limit alone
+    games = [make_game_weather("GB", "CHI", absurdly_long_forecast)]
+
+    texts = build_post_texts(games, GAME_DATE)
+
+    assert len(texts) == 1
+    assert len(texts[0]) <= 280
+    # the header (not just the truncated game line) is still present - never a header-only post
+    assert "NFL Weather Report" in texts[0]
+    assert "GB" in texts[0]
