@@ -21,6 +21,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "pytest-mock>=3.15.1",
     "respx>=0.23.1",
     "ruff>=0.16.8",
@@ -39,6 +40,20 @@ python-version = "3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov --cov-report=term-missing"
 markers = [
     "integration: exercises real external APIs (network required)",
 ]
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]
+show_missing = true
+fail_under = 80
