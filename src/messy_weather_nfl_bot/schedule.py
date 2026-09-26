@@ -52,9 +52,7 @@ def _resolve_stadium(home_team: str, venue_name: str, venue_indoor: bool) -> Sta
     return stadium
 
 
-def get_todays_games(
-    date: dt.date | None = None, client: httpx.Client | None = None
-) -> list[Game]:
+def get_todays_games(date: dt.date | None = None, client: httpx.Client | None = None) -> list[Game]:
     """Fetch NFL games scheduled for `date` (default: today, Eastern time)."""
     target_date = date or todays_local_date()
     owns_client = client is None
