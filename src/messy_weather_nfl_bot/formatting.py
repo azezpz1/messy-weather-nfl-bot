@@ -12,7 +12,7 @@ from messy_weather_nfl_bot.schedule import GAME_DAY_TIMEZONE
 MAX_POST_LENGTH = 280
 
 
-def _format_kickoff(kickoff: dt.datetime) -> str:
+def format_kickoff(kickoff: dt.datetime) -> str:
     """Kickoff time in the NFL's Eastern game-day timezone, e.g. "1:00pm ET"."""
     local = kickoff.astimezone(GAME_DAY_TIMEZONE)
     hour = local.hour % 12 or 12
@@ -23,7 +23,7 @@ def _format_kickoff(kickoff: dt.datetime) -> str:
 def format_game_line(gw: GameWeather) -> str:
     emoji = EMOJI[gw.condition]
     weather = gw.weather
-    kickoff = _format_kickoff(gw.game.kickoff)
+    kickoff = format_kickoff(gw.game.kickoff)
     parts = [f"{weather.short_forecast}"]
     if weather.temperature_f is not None:
         parts.append(f"{weather.temperature_f}°F")

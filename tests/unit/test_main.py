@@ -1,11 +1,23 @@
 import datetime as dt
+import logging
 
 import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot.main import EXIT_NOTHING_POSTED, EXIT_OK, EXIT_PARTIAL, run
+from messy_weather_nfl_bot.main import (
+    EXIT_NOTHING_POSTED,
+    EXIT_OK,
+    EXIT_PARTIAL,
+    configure_logging,
+    logger,
+    main,
+    parse_args,
+    run,
+)
 from messy_weather_nfl_bot.schedule import SCOREBOARD_URL
+
+LOGGER_NAME = "messy_weather_nfl_bot"
 
 GB_LAT, GB_LON = 44.5013, -88.0622
 BUF_LAT, BUF_LON = 42.7738, -78.7870
@@ -45,6 +57,15 @@ def _two_game_schedule() -> dict:
         "events": [
             _event("GB", "CHI", "Lambeau Field"),
             _event("BUF", "NE", "Highmark Stadium"),
+        ]
+    }
+
+
+def _covered_and_international_schedule() -> dict:
+    return {
+        "events": [
+            _event("MIN", "DET", "U.S. Bank Stadium"),
+            _event("JAX", "PHI", "Tottenham Hotspur Stadium"),
         ]
     }
 
@@ -120,7 +141,7 @@ def test_all_games_succeed_returns_ok() -> None:
 
 @respx.mock
 def test_one_poster_failing_still_lets_the_others_post(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
 
@@ -154,12 +175,12 @@ def test_one_poster_failing_still_lets_the_others_post(
 
     assert exit_code == EXIT_PARTIAL
     assert posted_texts  # the working poster still ran, despite the broken one raising
-    assert "platform is down" in capsys.readouterr().err
+    assert "platform is down" in caplog.text
 
 
 @respx.mock
 def test_a_partially_posted_thread_is_partial_not_nothing_posted(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     # If the root of a thread published before a later reply failed, the poster did
     # publish something - that must not be reported as EXIT_NOTHING_POSTED.
@@ -189,4 +210,217 @@ def test_a_partially_posted_thread_is_partial_not_nothing_posted(
     exit_code = run(platform_names=["bluesky"], dry_run=False)
 
     assert exit_code == EXIT_PARTIAL
-    assert "Partially posted" in capsys.readouterr().err
+    assert "Partially posted" in caplog.text
+
+
+@respx.mock
+def test_skipped_games_log_their_reason(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(
+        return_value=httpx.Response(200, json=_covered_and_international_schedule())
+    )
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    assert exit_code == EXIT_OK  # no outdoor games today at all
+    assert "DET @ MIN — skipped: covered stadium (U.S. Bank Stadium)" in caplog.text
+    assert (
+        'PHI @ JAX — skipped: international/neutral-site venue "Tottenham Hotspur Stadium"'
+        in caplog.text
+    )
+
+
+@respx.mock
+def test_forecast_unavailable_is_logged_as_a_skip_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=httpx.Response(500))
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    assert exit_code == EXIT_PARTIAL
+    assert "NE @ BUF — skipped: forecast unavailable" in caplog.text
+
+
+@respx.mock
+def test_included_game_logs_score_and_weather_detail(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+
+    run(platform_names=[], dry_run=True)
+
+    assert "CHI @ GB" in caplog.text
+    assert "included: score" in caplog.text
+    assert "Sunny, 40°F, 5mph" in caplog.text
+    assert "1 hourly period" in caplog.text
+
+
+@respx.mock
+def test_run_summary_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+
+    run(platform_names=[], dry_run=True)
+
+    assert "Run summary: 2 game(s) found, 2 outdoor, 2 evaluated" in caplog.text
+
+
+@respx.mock
+def test_run_summary_is_logged_even_when_no_outdoor_games(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    assert exit_code == EXIT_OK
+    assert "Run summary: 0 game(s) found, 0 outdoor, 0 evaluated" in caplog.text
+
+
+@respx.mock
+def test_run_summary_is_logged_even_when_every_forecast_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=httpx.Response(500))
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=httpx.Response(500))
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    assert exit_code == EXIT_NOTHING_POSTED
+    assert "Run summary: 2 game(s) found, 2 outdoor, 0 evaluated" in caplog.text
+
+
+@respx.mock
+def test_healthcheck_pings_start_and_end_with_matching_rid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/test-uuid")
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
+    start_route = respx.get("https://hc-ping.com/test-uuid/start").mock(
+        return_value=httpx.Response(200)
+    )
+    end_route = respx.post("https://hc-ping.com/test-uuid/0").mock(
+        return_value=httpx.Response(200)
+    )
+
+    exit_code = main(["--dry-run"])
+
+    assert exit_code == EXIT_OK
+    assert start_route.called
+    assert end_route.called
+    start_rid = start_route.calls.last.request.url.params["rid"]
+    end_rid = end_route.calls.last.request.url.params["rid"]
+    assert start_rid == end_rid
+    assert end_route.calls.last.request.content  # the summary/log-tail body
+
+
+@respx.mock
+def test_no_healthcheck_url_means_no_pings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HEALTHCHECK_URL", raising=False)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
+
+    exit_code = main(["--dry-run"])
+
+    assert exit_code == EXIT_OK
+    assert not any(call.request.url.host == "hc-ping.com" for call in respx.calls)
+
+
+@respx.mock
+def test_a_failed_healthcheck_ping_never_changes_the_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/test-uuid")
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
+    respx.get("https://hc-ping.com/test-uuid/start").mock(return_value=httpx.Response(500))
+    respx.post("https://hc-ping.com/test-uuid/0").mock(return_value=httpx.Response(500))
+
+    exit_code = main(["--dry-run"])
+
+    assert exit_code == EXIT_OK
+
+
+@respx.mock
+def test_an_unhandled_exception_still_sends_a_failure_ping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/test-uuid")
+    respx.get("https://hc-ping.com/test-uuid/start").mock(return_value=httpx.Response(200))
+    end_route = respx.post(f"https://hc-ping.com/test-uuid/{EXIT_NOTHING_POSTED}").mock(
+        return_value=httpx.Response(200)
+    )
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.run",
+        lambda platform_names, dry_run: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        main(["--dry-run"])
+
+    assert end_route.called
+
+
+def test_verbose_and_quiet_are_mutually_exclusive() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--verbose", "--quiet"])
+
+
+@pytest.mark.parametrize(
+    ("flags", "expected_logger_level", "expected_console_level"),
+    [
+        ([], logging.INFO, logging.NOTSET),
+        (["--verbose"], logging.DEBUG, logging.NOTSET),
+        # --quiet only raises the console handler's threshold - the logger itself stays
+        # at INFO, so a healthcheck ping body isn't missing the summary just because
+        # the console stayed quiet (see test_quiet_mode_still_captures_the_run_summary).
+        (["--quiet"], logging.INFO, logging.WARNING),
+    ],
+)
+def test_configure_logging_sets_the_level_from_cli_flags(
+    flags: list[str], expected_logger_level: int, expected_console_level: int
+) -> None:
+    args = parse_args(flags)
+    configure_logging(verbose=args.verbose, quiet=args.quiet)
+    assert logger.level == expected_logger_level
+    assert logger.handlers[0].level == expected_console_level
+
+
+@respx.mock
+def test_run_summary_is_logged_even_when_the_schedule_fetch_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(500))
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    assert exit_code == EXIT_NOTHING_POSTED
+    assert "Run summary: unavailable game(s) found, 0 outdoor, 0 evaluated" in caplog.text
+
+
+@respx.mock
+def test_quiet_mode_still_captures_the_run_summary_for_the_healthcheck_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # --quiet silences the console, but the healthcheck ping body must still carry the
+    # run summary - it's captured by a separate handler on the same (INFO-level) logger.
+    monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/test-uuid")
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
+    respx.get("https://hc-ping.com/test-uuid/start").mock(return_value=httpx.Response(200))
+    end_route = respx.post(f"https://hc-ping.com/test-uuid/{EXIT_OK}").mock(
+        return_value=httpx.Response(200)
+    )
+
+    exit_code = main(["--dry-run", "--quiet"])
+
+    assert exit_code == EXIT_OK
+    assert b"Run summary" in end_route.calls.last.request.content
