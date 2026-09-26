@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 from atproto import Client, models
+from atproto.exceptions import InvokeTimeoutError
 
 from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
 
@@ -23,6 +24,14 @@ class BlueskyPoster(SocialMediaPoster):
 
     def _remember(self, uri: str, cid: str) -> None:
         self._strong_refs[uri] = models.ComAtprotoRepoStrongRef.Main(cid=cid, uri=uri)
+
+    def _is_retryable(self, exc: BaseException) -> bool:
+        """`InvokeTimeoutError` means the client gave up waiting - no response ever
+        arrived, so the post may already have gone through server-side, and retrying
+        risks publishing it twice. Every other atproto request error carries a
+        response: either a definite rejection, or (409/413/502) a status the API
+        itself calls safe to retry - so it's fine to retry those."""
+        return not isinstance(exc, InvokeTimeoutError)
 
     def resume_from(self, posted: list[PostRef]) -> None:
         """Reseed the strong-ref cache `reply()` needs from refs loaded off disk - a

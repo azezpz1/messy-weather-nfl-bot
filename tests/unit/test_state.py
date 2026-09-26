@@ -47,6 +47,27 @@ def test_load_corrupt_file_is_ignored_rather_than_raising(tmp_path: Path) -> Non
     assert day.platforms == {}
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "[]",  # top-level list instead of an object
+        '{"platforms": []}',  # "platforms" is a list, not an object
+        '{"platforms": {"BlueskyPoster": []}}',  # a platform value that isn't an object
+        '{"platforms": {"BlueskyPoster": {"posts": [{"id": "root"}]}}}',  # post missing root_id
+        '{"platforms": {"BlueskyPoster": {"posts": "not-a-list"}}}',
+    ],
+)
+def test_load_malformed_but_valid_json_is_ignored_rather_than_raising(
+    tmp_path: Path, raw: str
+) -> None:
+    path = tmp_path / "2026-09-27.json"
+    path.write_text(raw)
+
+    day = state.DayState.load(path)
+
+    assert day.platforms == {}
+
+
 def test_record_then_load_round_trips_completed_thread(tmp_path: Path) -> None:
     path = tmp_path / "2026-09-27.json"
     day = state.DayState(path)

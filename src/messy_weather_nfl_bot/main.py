@@ -137,6 +137,20 @@ def _log_run_summary(
     )
 
 
+def _record_state(
+    day_state: state.DayState | None, platform: str, refs: list[state.PostRef], *, completed: bool
+) -> None:
+    """Persist `refs` for `platform`, without letting a state-write failure (a full
+    disk, a read-only directory) change the posting outcome or escape `run()` -
+    `refs` already published successfully regardless of whether this write does."""
+    if day_state is None:
+        return
+    try:
+        day_state.record(platform, refs, completed=completed)
+    except OSError as exc:
+        logger.warning("Could not save post state for %s: %s", platform, exc)
+
+
 def run(platform_names: list[str], dry_run: bool, force: bool = False) -> int:
     date = todays_local_date()
     try:
@@ -219,16 +233,14 @@ def run(platform_names: list[str], dry_run: bool, force: bool = False) -> int:
         try:
             refs = poster.post_thread(post_texts, resume=resume)
             platforms_posted.append(platform)
-            if day_state is not None:
-                day_state.record(platform, refs, completed=True)
+            _record_state(day_state, platform, refs, completed=True)
             if refs and thread_root is None:
                 thread_root = refs[0].id
         except PartialThreadError as exc:
             # Some posts in the thread went out before it failed - not "nothing
             # posted", but still worth flagging as degraded.
             platforms_degraded += 1
-            if day_state is not None:
-                day_state.record(platform, exc.posted, completed=False)
+            _record_state(day_state, platform, exc.posted, completed=False)
             logger.warning(
                 "Partially posted to %s (%d/%d posts before failing): %s",
                 platform,

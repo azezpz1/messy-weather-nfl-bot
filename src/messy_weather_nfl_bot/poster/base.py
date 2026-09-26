@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from tenacity import Retrying, stop_after_attempt, wait_exponential_jitter
+from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential_jitter
 
 # A couple of retries for a single post()/reply() call - transient network blips
 # shouldn't turn one flaky call into a broken thread that needs a manual resume.
@@ -55,10 +55,20 @@ class SocialMediaPoster(ABC):
         process, most likely loaded back from persisted state. A no-op by default;
         backends that keep such bookkeeping in memory override this."""
 
+    def _is_retryable(self, exc: BaseException) -> bool:
+        """Whether `exc` is safe to retry - i.e. it proves `post()`/`reply()` never
+        reached the point of publishing. True for everything by default; backends
+        whose failures can be ambiguous (the publish may have gone through despite
+        the exception, e.g. a client-side timeout with no response) should override
+        this, since blindly retrying a non-idempotent publish call risks creating
+        the very duplicate post this retry exists to route around."""
+        return True
+
     def _retrying(self) -> Retrying:
         return Retrying(
             stop=stop_after_attempt(PUBLISH_MAX_ATTEMPTS),
             wait=wait_exponential_jitter(initial=PUBLISH_BASE_DELAY),
+            retry=retry_if_exception(self._is_retryable),
             reraise=True,
         )
 

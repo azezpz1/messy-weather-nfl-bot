@@ -59,6 +59,9 @@ class PlatformState:
 
     @classmethod
     def from_json(cls, data: dict) -> PlatformState:
+        """Raises `(AttributeError, KeyError, TypeError)` if `data` isn't shaped like
+        something `to_json()` would have produced - callers (`DayState.load`) treat
+        that the same as corrupt JSON: log a warning and fall back to empty state."""
         posts = [
             PostRef(id=p["id"], root_id=p["root_id"], cid=p.get("cid"))
             for p in data.get("posts", [])
@@ -77,16 +80,18 @@ class DayState:
     def load(cls, path: Path) -> DayState:
         try:
             raw = json.loads(path.read_text())
+            platforms = {
+                name: PlatformState.from_json(value)
+                for name, value in raw.get("platforms", {}).items()
+            }
         except FileNotFoundError:
             return cls(path)
-        except (OSError, json.JSONDecodeError) as exc:
-            # A corrupt or unreadable state file shouldn't take the whole run down -
-            # worst case, a platform that already finished today gets reposted.
+        except (OSError, json.JSONDecodeError, AttributeError, KeyError, TypeError) as exc:
+            # Unreadable, corrupt, or valid JSON in an unexpected shape (e.g. a list
+            # where an object was expected) - none of it should take the whole run
+            # down. Worst case, a platform that already finished today gets reposted.
             logger.warning("Ignoring unreadable state file %s: %s", path, exc)
             return cls(path)
-        platforms = {
-            name: PlatformState.from_json(value) for name, value in raw.get("platforms", {}).items()
-        }
         return cls(path, platforms)
 
     def for_platform(self, name: str) -> PlatformState:
