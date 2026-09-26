@@ -24,7 +24,7 @@ def make_game_weather(home: str, away: str, short_forecast: str, wind_speed_mph:
         wind_speed_mph=wind_speed_mph,
         precipitation_probability=60,
     )
-    return evaluate_game(game, weather)
+    return evaluate_game(game, [weather])
 
 
 def test_format_game_line_includes_teams_emoji_and_temperature() -> None:

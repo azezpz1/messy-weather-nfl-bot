@@ -86,16 +86,18 @@ def test_sort_by_messiness_snow_always_first_even_with_lower_score() -> None:
     # A mild snow game should still rank above a severe (but snow-less) storm.
     snow = evaluate_game(
         make_game("GB"),
-        make_weather(short_forecast="Light Snow", temperature_f=30, wind_speed_mph=2),
+        [make_weather(short_forecast="Light Snow", temperature_f=30, wind_speed_mph=2)],
     )
     storm = evaluate_game(
         make_game("KC"),
-        make_weather(
-            short_forecast="Thunderstorms",
-            wind_speed_mph=45,
-            temperature_f=95,
-            precipitation_probability=100,
-        ),
+        [
+            make_weather(
+                short_forecast="Thunderstorms",
+                wind_speed_mph=45,
+                temperature_f=95,
+                precipitation_probability=100,
+            )
+        ],
     )
     assert storm.score > snow.score
 
@@ -105,8 +107,24 @@ def test_sort_by_messiness_snow_always_first_even_with_lower_score() -> None:
 
 
 def test_sort_by_messiness_orders_non_snow_games_by_score_descending() -> None:
-    mild = evaluate_game(make_game("GB"), make_weather(short_forecast="Sunny"))
-    windy = evaluate_game(make_game("KC"), make_weather(short_forecast="Windy", wind_speed_mph=35))
+    mild = evaluate_game(make_game("GB"), [make_weather(short_forecast="Sunny")])
+    windy = evaluate_game(
+        make_game("KC"), [make_weather(short_forecast="Windy", wind_speed_mph=35)]
+    )
 
     ranked = sort_by_messiness([mild, windy])
     assert [gw.condition for gw in ranked] == [Condition.WIND, Condition.CLEAR]
+
+
+def test_evaluate_game_picks_the_messiest_period_not_the_first() -> None:
+    # Kickoff is calm, but the game turns messy later - evaluate_game must surface that
+    # worst moment rather than just reporting conditions at kickoff.
+    calm_at_kickoff = make_weather(short_forecast="Sunny", wind_speed_mph=2, temperature_f=65)
+    snow_later = make_weather(
+        short_forecast="Snow", wind_speed_mph=20, temperature_f=25, precipitation_probability=90
+    )
+
+    result = evaluate_game(make_game("GB"), [calm_at_kickoff, snow_later])
+
+    assert result.condition == Condition.SNOW
+    assert result.weather == snow_later

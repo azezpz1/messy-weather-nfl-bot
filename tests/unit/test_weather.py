@@ -25,108 +25,91 @@ def test_parse_wind_speed_mph(wind_speed: str, expected: float) -> None:
 
 def _mock_forecast(periods: list[dict]) -> None:
     points_payload = {
-        "properties": {"forecast": "https://api.weather.gov/gridpoints/GRB/1,1/forecast"}
+        "properties": {
+            "forecastHourly": "https://api.weather.gov/gridpoints/GRB/1,1/forecast/hourly"
+        }
     }
     respx.get(f"https://api.weather.gov/points/{LAT},{LON}").mock(
         return_value=httpx.Response(200, json=points_payload)
     )
-    respx.get("https://api.weather.gov/gridpoints/GRB/1,1/forecast").mock(
+    respx.get("https://api.weather.gov/gridpoints/GRB/1,1/forecast/hourly").mock(
         return_value=httpx.Response(200, json={"properties": {"periods": periods}})
     )
 
 
+def _hourly_period(
+    hour_start: str,
+    short_forecast: str,
+    temperature: int,
+    wind: str,
+    precip: int | None,
+    is_daytime: bool = True,
+) -> dict:
+    start = dt.datetime.fromisoformat(hour_start)
+    end = start + dt.timedelta(hours=1)
+    return {
+        "startTime": start.isoformat(),
+        "endTime": end.isoformat(),
+        "isDaytime": is_daytime,
+        "shortForecast": short_forecast,
+        "temperature": temperature,
+        "windSpeed": wind,
+        "probabilityOfPrecipitation": {"value": precip},
+    }
+
+
 @respx.mock
-def test_get_forecast_selects_the_period_covering_kickoff_not_just_the_first_daytime_one() -> None:
-    # An afternoon "Sunny" period comes first, but this evening kickoff actually falls
-    # within the later "Snow" period - the bot must report that one, not the first daytime hit.
+def test_get_forecast_covers_the_whole_game_not_just_kickoff() -> None:
+    # Kickoff is clear, but snow rolls in an hour later - well within the game's length.
+    # The bot must catch that, not just report conditions at the opening whistle.
     periods = [
-        {
-            "startTime": "2026-01-18T06:00:00-05:00",
-            "endTime": "2026-01-18T12:00:00-05:00",
-            "isDaytime": False,
-            "shortForecast": "Clear",
-            "temperature": 20,
-            "windSpeed": "5 mph",
-            "probabilityOfPrecipitation": {"value": 0},
-        },
-        {
-            "startTime": "2026-01-18T12:00:00-05:00",
-            "endTime": "2026-01-18T18:00:00-05:00",
-            "isDaytime": True,
-            "shortForecast": "Sunny",
-            "temperature": 35,
-            "windSpeed": "5 mph",
-            "probabilityOfPrecipitation": {"value": 0},
-        },
-        {
-            "startTime": "2026-01-18T18:00:00-05:00",
-            "endTime": "2026-01-19T00:00:00-05:00",
-            "isDaytime": False,
-            "shortForecast": "Snow",
-            "temperature": 25,
-            "windSpeed": "10 to 15 mph",
-            "probabilityOfPrecipitation": {"value": 80},
-        },
+        _hourly_period("2026-01-18T17:00:00-05:00", "Sunny", 35, "5 mph", 0),
+        _hourly_period("2026-01-18T18:00:00-05:00", "Sunny", 34, "5 mph", 0),
+        _hourly_period("2026-01-18T19:00:00-05:00", "Snow", 28, "10 to 15 mph", 80),
+        _hourly_period("2026-01-18T20:00:00-05:00", "Snow", 26, "15 mph", 90),
+        _hourly_period("2026-01-18T21:00:00-05:00", "Snow", 25, "15 mph", 90),
+        _hourly_period("2026-01-18T22:00:00-05:00", "Clear", 24, "5 mph", 0),
     ]
     _mock_forecast(periods)
-    kickoff = dt.datetime(2026, 1, 18, 20, 20, tzinfo=EASTERN)  # 8:20pm ET
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)  # 6:00pm ET
 
-    report = get_forecast(LAT, LON, kickoff)
+    reports = get_forecast(LAT, LON, kickoff, game_duration=dt.timedelta(hours=3, minutes=30))
 
-    assert report.short_forecast == "Snow"
-    assert report.temperature_f == 25
-    assert report.wind_speed_mph == 15.0
-    assert report.precipitation_probability == 80
+    # Covers 18:00 through 21:30 -> the 18:00, 19:00, 20:00, and 21:00 periods.
+    assert [r.short_forecast for r in reports] == ["Sunny", "Snow", "Snow", "Snow"]
+    assert any(r.precipitation_probability == 90 for r in reports)
 
 
 @respx.mock
-def test_get_forecast_falls_back_to_first_daytime_period_if_none_cover_kickoff() -> None:
+def test_get_forecast_falls_back_to_first_daytime_period_if_none_cover_the_game_window() -> None:
     periods = [
-        {
-            "startTime": "2026-01-18T06:00:00-05:00",
-            "endTime": "2026-01-18T12:00:00-05:00",
-            "isDaytime": False,
-            "shortForecast": "Overnight Clear",
-            "temperature": 15,
-            "windSpeed": "0 mph",
-            "probabilityOfPrecipitation": {"value": None},
-        },
-        {
-            "startTime": "2026-01-18T12:00:00-05:00",
-            "endTime": "2026-01-18T18:00:00-05:00",
-            "isDaytime": True,
-            "shortForecast": "Sunny",
-            "temperature": 30,
-            "windSpeed": "5 mph",
-            "probabilityOfPrecipitation": {"value": 0},
-        },
+        _hourly_period(
+            "2026-01-18T06:00:00-05:00", "Overnight Clear", 15, "0 mph", None, is_daytime=False
+        ),
+        _hourly_period("2026-01-18T12:00:00-05:00", "Sunny", 30, "5 mph", 0, is_daytime=True),
     ]
     _mock_forecast(periods)
     # Kickoff is outside the returned forecast window entirely.
     kickoff = dt.datetime(2026, 1, 25, 13, 0, tzinfo=EASTERN)
 
-    report = get_forecast(LAT, LON, kickoff)
+    reports = get_forecast(LAT, LON, kickoff)
 
-    assert report.short_forecast == "Sunny"
+    assert len(reports) == 1
+    assert reports[0].short_forecast == "Sunny"
 
 
 @respx.mock
-def test_get_forecast_falls_back_to_first_period_if_none_are_daytime_or_cover_kickoff() -> None:
+def test_get_forecast_falls_back_to_first_period_if_none_are_daytime_or_cover_the_window() -> None:
     periods = [
-        {
-            "startTime": "2026-01-18T06:00:00-05:00",
-            "endTime": "2026-01-18T12:00:00-05:00",
-            "isDaytime": False,
-            "shortForecast": "Overnight Clear",
-            "temperature": 15,
-            "windSpeed": "0 mph",
-            "probabilityOfPrecipitation": {"value": None},
-        },
+        _hourly_period(
+            "2026-01-18T06:00:00-05:00", "Overnight Clear", 15, "0 mph", None, is_daytime=False
+        ),
     ]
     _mock_forecast(periods)
     kickoff = dt.datetime(2026, 1, 25, 13, 0, tzinfo=EASTERN)
 
-    report = get_forecast(LAT, LON, kickoff)
+    reports = get_forecast(LAT, LON, kickoff)
 
-    assert report.short_forecast == "Overnight Clear"
-    assert report.precipitation_probability is None
+    assert len(reports) == 1
+    assert reports[0].short_forecast == "Overnight Clear"
+    assert reports[0].precipitation_probability is None

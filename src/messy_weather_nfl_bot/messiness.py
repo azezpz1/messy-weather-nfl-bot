@@ -93,11 +93,18 @@ def messiness_score(weather: WeatherReport, condition: Condition) -> float:
     return precip_component + wind_component + temp_extremity + _CONDITION_SCORE_BONUS[condition]
 
 
-def evaluate_game(game: Game, weather: WeatherReport) -> GameWeather:
-    condition = classify_condition(weather)
-    return GameWeather(
-        game=game, weather=weather, condition=condition, score=messiness_score(weather, condition)
-    )
+def evaluate_game(game: Game, weather_reports: list[WeatherReport]) -> GameWeather:
+    """Evaluate every forecast period spanning the game and report the messiest one -
+    weather can turn ugly well after kickoff, so the worst point in the game is what
+    matters, not just the conditions at the opening whistle."""
+    worst: GameWeather | None = None
+    for weather in weather_reports:
+        condition = classify_condition(weather)
+        score = messiness_score(weather, condition)
+        if worst is None or score > worst.score:
+            worst = GameWeather(game=game, weather=weather, condition=condition, score=score)
+    assert worst is not None  # weather_reports is always non-empty (see get_forecast)
+    return worst
 
 
 def sort_by_messiness(games: list[GameWeather]) -> list[GameWeather]:
