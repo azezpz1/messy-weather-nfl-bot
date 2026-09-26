@@ -66,10 +66,18 @@ that exports them before invoking `uv`.
 
 ### Updating to the latest release
 
-Releases are cut via the "Release" GitHub Actions workflow (run manually from
-the Actions tab), which bumps the version, tags it (`vX.Y.Z`), and publishes
-a GitHub release. Rather than tracking `main` directly, point a deployment
-(e.g. a Raspberry Pi) at the latest tag instead:
+Releases are cut in two steps, since `main` is protected against direct
+pushes:
+
+1. Run the "Release (prepare)" workflow manually from the Actions tab,
+   choosing a `patch`/`minor`/`major` bump. It bumps the version and opens a
+   PR (`release/vX.Y.Z`) with the change.
+2. Merge that PR. Merging triggers the "Release (publish)" workflow, which
+   tags the merge commit (`vX.Y.Z`) and publishes a GitHub release with
+   auto-generated notes.
+
+Rather than tracking `main` directly, point a deployment (e.g. a Raspberry
+Pi) at the latest tag instead:
 
 ```sh
 cd /path/to/messy-weather-nfl-bot

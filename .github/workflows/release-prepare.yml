@@ -1,4 +1,4 @@
-name: Release
+name: Release (prepare)
 
 on:
   workflow_dispatch:
@@ -11,9 +11,10 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -41,20 +42,22 @@ jobs:
           uv version --bump ${{ inputs.bump }}
           echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
 
-      - name: Commit, tag, and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml uv.lock
-          git commit -m "chore: release v${{ steps.bump.outputs.version }}"
-          git tag "v${{ steps.bump.outputs.version }}"
-          git push origin HEAD:${{ github.ref_name }}
-          git push origin "v${{ steps.bump.outputs.version }}"
-
-      - name: Create GitHub release
+      - name: Open release pull request
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v${{ steps.bump.outputs.version }}" \
-            --title "v${{ steps.bump.outputs.version }}" \
-            --generate-notes
+          version="${{ steps.bump.outputs.version }}"
+          branch="release/v${version}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add pyproject.toml uv.lock
+          git commit -m "chore: release v${version}"
+          git push origin "$branch"
+
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore: release v${version}" \
+            --body "Version bump for release v${version}. Merging this PR tags the merge commit and publishes the GitHub release."
