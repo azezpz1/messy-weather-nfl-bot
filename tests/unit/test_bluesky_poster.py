@@ -14,6 +14,11 @@ def _rate_limit_error(headers: dict[str, str]) -> RateLimitExceededError:
     return RateLimitExceededError(response=response)
 
 
+def _network_error_with_response(status_code: int) -> NetworkError:
+    response = Response(success=False, status_code=status_code, content=None, headers={})
+    return NetworkError(response=response)
+
+
 class _DummyClient:
     """Stands in for atproto's Client - BlueskyPoster only calls login() when no
     client is injected, so passing one skips that entirely."""
@@ -33,9 +38,21 @@ def test_invoke_timeout_error_is_not_retryable() -> None:
     assert poster._is_retryable(InvokeTimeoutError()) is False
 
 
-def test_other_atproto_errors_are_retryable() -> None:
+def test_network_error_without_a_response_is_not_retryable() -> None:
+    # A dropped connection: atproto wraps a raw httpx.NetworkError into this with no
+    # response ever arriving - same ambiguity as a timeout, so not safe to retry.
     poster = _poster()
-    assert poster._is_retryable(NetworkError()) is True
+    assert poster._is_retryable(NetworkError()) is False
+
+
+def test_network_error_with_a_response_is_retryable() -> None:
+    # 409/413/502 - statuses the API itself calls safe to retry - carry a response.
+    poster = _poster()
+    assert poster._is_retryable(_network_error_with_response(502)) is True
+
+
+def test_non_atproto_errors_are_retryable() -> None:
+    poster = _poster()
     assert poster._is_retryable(RuntimeError("unrelated")) is True
 
 

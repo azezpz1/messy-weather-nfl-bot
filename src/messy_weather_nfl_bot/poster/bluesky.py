@@ -6,7 +6,7 @@ import os
 from datetime import UTC, datetime
 
 from atproto import Client, models
-from atproto.exceptions import InvokeTimeoutError, RateLimitExceededError
+from atproto.exceptions import RateLimitExceededError, RequestErrorBase
 
 from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
 
@@ -33,12 +33,16 @@ class BlueskyPoster(SocialMediaPoster):
         self._strong_refs[uri] = models.ComAtprotoRepoStrongRef.Main(cid=cid, uri=uri)
 
     def _is_retryable(self, exc: BaseException) -> bool:
-        """`InvokeTimeoutError` means the client gave up waiting - no response ever
-        arrived, so the post may already have gone through server-side, and retrying
-        risks publishing it twice. Every other atproto request error carries a
-        response: either a definite rejection, or (409/413/502) a status the API
-        itself calls safe to retry - so it's fine to retry those."""
-        return not isinstance(exc, InvokeTimeoutError)
+        """An atproto request error with no response (a client-side timeout, or a
+        dropped connection - both `InvokeTimeoutError` and a response-less
+        `NetworkError` per atproto_client.request._handle_request_errors) means the
+        failure happened before any response arrived, so the post may already have
+        gone through server-side - retrying risks publishing it twice. Every error
+        that does carry a response - a definite rejection, or a status (409/413/502)
+        the API itself calls safe to retry - is fine to retry."""
+        if isinstance(exc, RequestErrorBase):
+            return exc.response is not None
+        return True
 
     def _retry_delay(self, exc: BaseException) -> float | None:
         """A 429's own requested wait, when it has one - retrying on the default
