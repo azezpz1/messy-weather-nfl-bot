@@ -64,6 +64,24 @@ Cron does not load your shell profile or `.env` files automatically, so
 them explicitly: set them directly in the crontab, or in a wrapper script
 that exports them before invoking `uv`.
 
+### Updating to the latest release
+
+Releases are cut via the "Release" GitHub Actions workflow (run manually from
+the Actions tab), which bumps the version, tags it (`vX.Y.Z`), and publishes
+a GitHub release. Rather than tracking `main` directly, point a deployment
+(e.g. a Raspberry Pi) at the latest tag instead:
+
+```sh
+cd /path/to/messy-weather-nfl-bot
+git fetch --tags
+git checkout "$(git describe --tags "$(git rev-list --tags --max-count=1)")"
+uv sync
+```
+
+Run that before your scheduled job (e.g. as the first line of the wrapper
+script your crontab invokes) to stay on the latest release without ever
+checking out unreleased commits from `main`.
+
 ## Development
 
 ```sh
