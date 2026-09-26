@@ -64,6 +64,39 @@ Cron does not load your shell profile or `.env` files automatically, so
 them explicitly: set them directly in the crontab, or in a wrapper script
 that exports them before invoking `uv`.
 
+### Updating to the latest release
+
+Releases are cut in two steps, since `main` is protected against direct
+pushes:
+
+1. Run the "Release (prepare)" workflow manually from the Actions tab,
+   choosing a `patch`/`minor`/`major` bump. It bumps the version and opens a
+   PR (`release/vX.Y.Z`) with the change.
+2. Merge that PR. Merging triggers the "Release (publish)" workflow, which
+   tags the merge commit (`vX.Y.Z`) and publishes a GitHub release with
+   auto-generated notes.
+
+Rather than tracking `main` directly, point a deployment (e.g. a Raspberry
+Pi) at the latest tag instead:
+
+```sh
+cd /path/to/messy-weather-nfl-bot
+repo=$(git remote get-url origin | sed -E 's#^.*[:/]([^/]+/[^/]+)$#\1#; s#\.git$##')
+latest_tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
+  | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+git fetch --tags
+git checkout "$latest_tag"
+uv sync
+```
+
+This asks GitHub for the latest *published* release rather than just the
+newest tag, since a repo could in principle have tags that were never turned
+into a release.
+
+Run that before your scheduled job (e.g. as the first line of the wrapper
+script your crontab invokes) to stay on the latest release without ever
+checking out unreleased commits from `main`.
+
 ## Development
 
 ```sh
