@@ -40,6 +40,11 @@ def test_format_game_line_omits_wind_when_calm() -> None:
     assert "mph wind" not in format_game_line(gw)
 
 
+def test_format_game_line_includes_kickoff_time_in_eastern() -> None:
+    gw = make_game_weather("GB", "CHI", "Snow")  # kickoff is 18:00 UTC == 1:00pm ET
+    assert "1:00pm ET" in format_game_line(gw)
+
+
 def test_build_post_texts_empty_games_returns_no_posts() -> None:
     assert build_post_texts([], GAME_DATE) == []
 
