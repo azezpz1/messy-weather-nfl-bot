@@ -5,19 +5,32 @@ from __future__ import annotations
 import datetime as dt
 
 from messy_weather_nfl_bot.messiness import EMOJI, GameWeather
+from messy_weather_nfl_bot.schedule import GAME_DAY_TIMEZONE
 
 # Bluesky's real limit is 300 graphemes; stay conservative since multi-codepoint emoji
 # can count as more than one grapheme and Python's len() undercounts that.
 MAX_POST_LENGTH = 280
 
 
+def _format_kickoff(kickoff: dt.datetime) -> str:
+    """Kickoff time in the NFL's Eastern game-day timezone, e.g. "1:00pm ET"."""
+    local = kickoff.astimezone(GAME_DAY_TIMEZONE)
+    hour = local.hour % 12 or 12
+    period = "am" if local.hour < 12 else "pm"
+    return f"{hour}:{local.minute:02d}{period} ET"
+
+
 def format_game_line(gw: GameWeather) -> str:
     emoji = EMOJI[gw.condition]
     weather = gw.weather
+    kickoff = _format_kickoff(gw.game.kickoff)
     parts = [f"{weather.short_forecast}", f"{weather.temperature_f}°F"]
     if weather.wind_speed_mph > 0:
         parts.append(f"{weather.wind_speed_mph:g}mph wind")
-    return f"\U0001f3c8 {gw.game.away_team} @ {gw.game.home_team}: {emoji} {', '.join(parts)}"
+    return (
+        f"\U0001f3c8 {gw.game.away_team} @ {gw.game.home_team} ({kickoff}): "
+        f"{emoji} {', '.join(parts)}"
+    )
 
 
 def format_header(date: dt.date) -> str:
