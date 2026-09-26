@@ -83,7 +83,8 @@ def test_a_failed_ping_never_logs_the_secret_bearing_url(
     healthcheck.ping_start(BASE_URL, "abc-123")
 
     assert "test-uuid" not in caplog.text
-    assert "hc-ping.com" in caplog.text  # host is fine to log, just not the secret path
+    # The redacted form (scheme + host only) is fine to log - just not the secret path.
+    assert healthcheck._redact(BASE_URL) in caplog.text
 
 
 @respx.mock
