@@ -44,6 +44,11 @@ jobs:
           uv version --bump ${{ inputs.bump }}
           echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
 
+      # NOTE: this uses the default GITHUB_TOKEN, so the pull_request-triggered
+      # CI workflow will NOT run against the PR opened below — GitHub doesn't
+      # start pull_request workflows for PRs opened by GITHUB_TOKEN. The lint,
+      # type check, and test steps above run against `main` as a partial
+      # substitute. See "Releasing" in README.md for details and the real fix.
       - name: Open release pull request
         env:
           GH_TOKEN: ${{ github.token }}

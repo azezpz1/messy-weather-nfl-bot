@@ -158,6 +158,23 @@ Integration tests hit the real ESPN and NWS APIs (no credentials needed) but
 never post to Bluesky — they use a console-printing poster instead. They run
 in CI on every push and pull request via GitHub Actions.
 
+### Releasing
+
+The "Release (prepare)" workflow (manually triggered) bumps the version,
+commits, and opens a `release/vX.Y.Z` pull request; merging that PR triggers
+"Release (publish)", which tags the merge commit and creates the GitHub
+release.
+
+**Known gap:** the release PR itself never gets a CI run. GitHub does not
+start `pull_request`-triggered workflows for PRs opened with the default
+`GITHUB_TOKEN`, which is what "Release (prepare)" uses to open the PR. The
+prepare job runs lint, type checks, and unit tests *before* opening the PR
+as a partial substitute, but the PR won't show a CI check and integration
+tests aren't run against it. Fixing this properly requires authenticating
+`gh pr create` with a GitHub App token or a fine-grained PAT (owned by a
+non-Actions identity) instead of `GITHUB_TOKEN`, which needs a repository
+secret to be provisioned by a maintainer.
+
 ### Code coverage
 
 `pytest` runs with [`pytest-cov`](https://pytest-cov.readthedocs.io/) enabled
