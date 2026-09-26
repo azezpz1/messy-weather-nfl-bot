@@ -11,7 +11,7 @@ from collections.abc import Sequence
 
 import httpx
 
-from messy_weather_nfl_bot import healthcheck
+from messy_weather_nfl_bot import healthcheck, state
 from messy_weather_nfl_bot.formatting import build_post_texts, format_kickoff
 from messy_weather_nfl_bot.messiness import GameWeather, evaluate_game, sort_by_messiness
 from messy_weather_nfl_bot.poster import POSTERS
@@ -42,6 +42,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Print what would be posted instead of posting to any real platform.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Repost even if today's thread already finished on a platform, ignoring "
+            "saved state."
+        ),
     )
     verbosity = parser.add_mutually_exclusive_group()
     verbosity.add_argument(
@@ -129,7 +137,7 @@ def _log_run_summary(
     )
 
 
-def run(platform_names: list[str], dry_run: bool) -> int:
+def run(platform_names: list[str], dry_run: bool, force: bool = False) -> int:
     date = todays_local_date()
     try:
         games = get_todays_games(date)
@@ -184,21 +192,43 @@ def run(platform_names: list[str], dry_run: bool) -> int:
     post_texts = build_post_texts(ranked, date)
     posters = build_posters(platform_names, dry_run)
 
+    # A dry run must never touch the state file - only construct a DayState (which
+    # reads it) when actually posting for real.
+    day_state = None if dry_run else state.DayState.load(state.state_file_path(date))
+
     platforms_posted: list[str] = []
     platforms_failed = 0
     platforms_degraded = 0
     thread_root: str | None = None
     for poster in posters:
         platform = type(poster).__name__
+        resume: list[state.PostRef] | None = None
+        if day_state is not None and not force:
+            platform_state = day_state.for_platform(platform)
+            if platform_state.completed:
+                logger.info(
+                    "%s already posted today's thread; skipping (use --force to repost).",
+                    platform,
+                )
+                platforms_posted.append(platform)
+                if platform_state.posts and thread_root is None:
+                    thread_root = platform_state.posts[0].id
+                continue
+            resume = platform_state.posts or None
+
         try:
-            refs = poster.post_thread(post_texts)
+            refs = poster.post_thread(post_texts, resume=resume)
             platforms_posted.append(platform)
+            if day_state is not None:
+                day_state.record(platform, refs, completed=True)
             if refs and thread_root is None:
                 thread_root = refs[0].id
         except PartialThreadError as exc:
             # Some posts in the thread went out before it failed - not "nothing
             # posted", but still worth flagging as degraded.
             platforms_degraded += 1
+            if day_state is not None:
+                day_state.record(platform, exc.posted, completed=False)
             logger.warning(
                 "Partially posted to %s (%d/%d posts before failing): %s",
                 platform,
@@ -235,7 +265,7 @@ def main(argv: list[str] | None = None) -> int:
         healthcheck.ping_start(healthcheck_url, run_id)
 
     try:
-        exit_code = run(platform_names, args.dry_run)
+        exit_code = run(platform_names, args.dry_run, args.force)
     except BaseException:
         # An unhandled exception means no completion ping below would ever fire -
         # Healthchecks would only notice once the run's grace period expires. Report
