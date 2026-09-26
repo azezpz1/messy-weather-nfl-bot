@@ -46,7 +46,10 @@ else
   release_json=$(curl -fsSL "$api_url")
 fi
 
-latest_tag=$(echo "$release_json" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+# sed prints nothing (exit 0) rather than failing when tag_name is absent,
+# so a missing tag falls through to the check below instead of tripping
+# `set -e`/`pipefail` with no explanation.
+latest_tag=$(printf '%s\n' "$release_json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
 
 if [[ -z "$latest_tag" ]]; then
   echo "error: could not determine latest release tag for $repo" >&2
@@ -59,7 +62,12 @@ echo "Latest published release: $latest_tag"
 git fetch --tags
 
 current_tag=$(git describe --tags --exact-match 2>/dev/null || true)
-if [[ "$current_tag" == "$latest_tag" ]]; then
+head_detached=true
+if git symbolic-ref -q HEAD >/dev/null; then
+  head_detached=false
+fi
+
+if [[ "$current_tag" == "$latest_tag" && "$head_detached" == true ]]; then
   echo "Already on $latest_tag, nothing to do."
 else
   # Check out the tag ref explicitly (detached) so a local branch sharing
