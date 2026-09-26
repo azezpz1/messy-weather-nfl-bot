@@ -158,6 +158,16 @@ Integration tests hit the real ESPN and NWS APIs (no credentials needed) but
 never post to Bluesky — they use a console-printing poster instead. They run
 in CI on every push and pull request via GitHub Actions.
 
+### Pre-commit hooks
+
+Optionally, install [pre-commit](https://pre-commit.com/) to run ruff (lint
+and format) and ty automatically before each commit:
+
+```sh
+uv tool install pre-commit --with pre-commit-uv
+pre-commit install
+```
+
 ### Code coverage
 
 `pytest` runs with [`pytest-cov`](https://pytest-cov.readthedocs.io/) enabled
