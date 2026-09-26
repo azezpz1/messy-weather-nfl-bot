@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from messy_weather_nfl_bot.retry import request_with_retry
+
 POINTS_URL = "https://api.weather.gov/points/{lat},{lon}"
 
 # NWS asks API consumers to identify themselves in the User-Agent.
@@ -46,6 +48,8 @@ def _parse_wind_speed_mph(wind_speed: str) -> float:
 def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime) -> list[dict]:
     """Return every forecast period overlapping [start, end), falling back to the soonest
     daytime period (then the first period) if none overlap at all."""
+    if not periods:
+        raise ValueError("NWS returned no forecast periods")
     covering = [
         period
         for period in periods
@@ -58,6 +62,47 @@ def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime
         if period.get("isDaytime"):
             return [period]
     return [periods[0]]
+
+
+def _forecast_hourly_url(points_payload: object) -> str:
+    if not isinstance(points_payload, dict):
+        kind = type(points_payload).__name__
+        raise ValueError(f"Unexpected NWS points response shape: expected object, got {kind}")
+    properties = points_payload.get("properties")
+    if not isinstance(properties, dict) or "forecastHourly" not in properties:
+        raise ValueError(
+            "Unexpected NWS points response shape: missing 'properties.forecastHourly'"
+        )
+    return properties["forecastHourly"]
+
+
+def _forecast_periods(forecast_payload: object) -> list[dict]:
+    if not isinstance(forecast_payload, dict):
+        kind = type(forecast_payload).__name__
+        raise ValueError(f"Unexpected NWS forecast response shape: expected object, got {kind}")
+    properties = forecast_payload.get("properties")
+    if not isinstance(properties, dict):
+        kind = type(properties).__name__
+        raise ValueError(
+            f"Unexpected NWS forecast response shape: expected 'properties' object, got {kind}"
+        )
+    periods = properties.get("periods")
+    if not isinstance(periods, list):
+        kind = type(periods).__name__
+        raise ValueError(
+            f"Unexpected NWS forecast response shape: expected 'periods' list, got {kind}"
+        )
+    for period in periods:
+        if (
+            not isinstance(period, dict)
+            or not isinstance(period.get("startTime"), str)
+            or not isinstance(period.get("endTime"), str)
+        ):
+            raise ValueError(
+                "Unexpected NWS forecast response shape: a period is missing a "
+                "string 'startTime'/'endTime'"
+            )
+    return periods
 
 
 def _period_to_report(period: dict) -> WeatherReport:
@@ -87,14 +132,20 @@ def get_forecast(
     conditions at the moment it starts."""
     owns_client = client is None
     http_client = client or httpx.Client(timeout=10.0, headers={"User-Agent": USER_AGENT})
-    try:
-        points_response = http_client.get(POINTS_URL.format(lat=latitude, lon=longitude))
-        points_response.raise_for_status()
-        forecast_url = points_response.json()["properties"]["forecastHourly"]
 
-        forecast_response = http_client.get(forecast_url)
-        forecast_response.raise_for_status()
-        periods = forecast_response.json()["properties"]["periods"]
+    def _get(url: str) -> httpx.Response:
+        response = http_client.get(url)
+        response.raise_for_status()
+        return response
+
+    try:
+        points_response = request_with_retry(
+            lambda: _get(POINTS_URL.format(lat=latitude, lon=longitude))
+        )
+        forecast_url = _forecast_hourly_url(points_response.json())
+
+        forecast_response = request_with_retry(lambda: _get(forecast_url))
+        periods = _forecast_periods(forecast_response.json())
     finally:
         if owns_client:
             http_client.close()
