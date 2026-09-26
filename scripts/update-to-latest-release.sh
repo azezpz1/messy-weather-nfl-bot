@@ -62,7 +62,9 @@ current_tag=$(git describe --tags --exact-match 2>/dev/null || true)
 if [[ "$current_tag" == "$latest_tag" ]]; then
   echo "Already on $latest_tag, nothing to do."
 else
-  git checkout "$latest_tag"
+  # Check out the tag ref explicitly (detached) so a local branch sharing
+  # the tag's name can't be selected instead.
+  git checkout --detach "refs/tags/$latest_tag"
   echo "Checked out $latest_tag"
 fi
 
