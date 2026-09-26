@@ -32,9 +32,19 @@ repo=$(echo "$remote_url" | sed -E 's#^.*[:/]([^/]+/[^/]+)$#\1#; s#\.git$##')
 
 echo "Checking latest release for $repo..."
 
-release_json=$(curl -fsSL \
-  ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
-  "https://api.github.com/repos/$repo/releases/latest")
+api_url="https://api.github.com/repos/$repo/releases/latest"
+
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  # Pass the token via a curl config read from stdin rather than -H/argv, so
+  # it doesn't show up in `ps` output for other local users to see.
+  release_json=$(curl -fsSL --config - <<EOF
+url = "$api_url"
+header = "Authorization: Bearer ${GITHUB_TOKEN//\"/\\\"}"
+EOF
+)
+else
+  release_json=$(curl -fsSL "$api_url")
+fi
 
 latest_tag=$(echo "$release_json" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
 
