@@ -81,10 +81,17 @@ Pi) at the latest tag instead:
 
 ```sh
 cd /path/to/messy-weather-nfl-bot
+repo=$(git remote get-url origin | sed -E 's#.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#')
+latest_tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
+  | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
 git fetch --tags
-git checkout "$(git describe --tags "$(git rev-list --tags --max-count=1)")"
+git checkout "$latest_tag"
 uv sync
 ```
+
+This asks GitHub for the latest *published* release rather than just the
+newest tag, since a repo could in principle have tags that were never turned
+into a release.
 
 Run that before your scheduled job (e.g. as the first line of the wrapper
 script your crontab invokes) to stay on the latest release without ever
