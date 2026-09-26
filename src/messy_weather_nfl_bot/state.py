@@ -57,15 +57,23 @@ class PlatformState:
             "posts": [{"id": r.id, "root_id": r.root_id, "cid": r.cid} for r in self.posts],
         }
 
+    @staticmethod
+    def _post_ref_from_json(p: dict) -> PostRef:
+        post_id = p["id"]
+        root_id = p["root_id"]
+        cid = p.get("cid")
+        if not isinstance(post_id, str) or not isinstance(root_id, str):
+            raise TypeError("post reference id/root_id must be strings")
+        if cid is not None and not isinstance(cid, str):
+            raise TypeError("post reference cid must be a string or None")
+        return PostRef(id=post_id, root_id=root_id, cid=cid)
+
     @classmethod
     def from_json(cls, data: dict) -> PlatformState:
         """Raises `(AttributeError, KeyError, TypeError)` if `data` isn't shaped like
         something `to_json()` would have produced - callers (`DayState.load`) treat
         that the same as corrupt JSON: log a warning and fall back to empty state."""
-        posts = [
-            PostRef(id=p["id"], root_id=p["root_id"], cid=p.get("cid"))
-            for p in data.get("posts", [])
-        ]
+        posts = [cls._post_ref_from_json(p) for p in data.get("posts", [])]
         return cls(posts=posts, completed=bool(data.get("completed", False)))
 
 

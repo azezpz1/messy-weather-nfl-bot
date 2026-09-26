@@ -55,6 +55,12 @@ def test_load_corrupt_file_is_ignored_rather_than_raising(tmp_path: Path) -> Non
         '{"platforms": {"BlueskyPoster": []}}',  # a platform value that isn't an object
         '{"platforms": {"BlueskyPoster": {"posts": [{"id": "root"}]}}}',  # post missing root_id
         '{"platforms": {"BlueskyPoster": {"posts": "not-a-list"}}}',
+        # id/root_id/cid of the wrong type - would otherwise reach resume_from() and
+        # blow up there (e.g. an unhashable list used as a strong-ref cache key).
+        '{"platforms": {"BlueskyPoster": {"posts": [{"id": [], "root_id": "root"}]}}}',
+        '{"platforms": {"BlueskyPoster": {"posts": [{"id": "root", "root_id": 1}]}}}',
+        '{"platforms": {"BlueskyPoster": '
+        '{"posts": [{"id": "root", "root_id": "root", "cid": 1}]}}}',
     ],
 )
 def test_load_malformed_but_valid_json_is_ignored_rather_than_raising(
