@@ -158,6 +158,27 @@ Integration tests hit the real ESPN and NWS APIs (no credentials needed) but
 never post to Bluesky — they use a console-printing poster instead. They run
 in CI on every push and pull request via GitHub Actions.
 
+### Releasing
+
+The "Release (prepare)" workflow (manually triggered) bumps the version,
+commits, and opens a `release/vX.Y.Z` pull request; merging that PR triggers
+"Release (publish)", which tags the merge commit and creates the GitHub
+release.
+
+**Known gap:** the release PR's CI run needs a manual approval. "Release
+(prepare)" opens the PR using the default `GITHUB_TOKEN`. GitHub puts the
+resulting `pull_request`-triggered CI run into an approval-required state — a user
+with write access has to click "Approve and run" in the PR's merge box
+before it (and the integration tests) actually execute. This is distinct
+from the separate approval gate for PRs from forks or first-time
+contributors. The prepare job runs lint, type checks, and unit tests
+*before* opening the PR as a partial substitute, but if the release PR is
+merged before anyone approves the run, it merges without CI ever having
+executed against it. Fixing this so CI runs automatically requires
+authenticating `gh pr create` with a GitHub App token or a fine-grained PAT
+(owned by a non-Actions identity) instead of `GITHUB_TOKEN`, which needs a
+repository secret to be provisioned by a maintainer.
+
 ### Pre-commit hooks
 
 Optionally, install [pre-commit](https://pre-commit.com/) to run ruff (lint
