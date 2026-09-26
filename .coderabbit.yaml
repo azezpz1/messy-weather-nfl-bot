@@ -1,2 +1,5 @@
 reviews:
   profile: assertive
+  finishing_touches:
+    docstrings:
+      enabled: false
