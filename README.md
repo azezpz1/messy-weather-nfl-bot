@@ -81,7 +81,7 @@ Pi) at the latest tag instead:
 
 ```sh
 cd /path/to/messy-weather-nfl-bot
-repo=$(git remote get-url origin | sed -E 's#.*[:/]([^/]+/[^/]+?)(\.git)?$#\1#')
+repo=$(git remote get-url origin | sed -E 's#^.*[:/]([^/]+/[^/]+)$#\1#; s#\.git$##')
 latest_tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
   | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
 git fetch --tags
