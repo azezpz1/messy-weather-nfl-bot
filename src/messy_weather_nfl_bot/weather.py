@@ -91,15 +91,19 @@ def get_forecast(
     conditions at the moment it starts."""
     owns_client = client is None
     http_client = client or httpx.Client(timeout=10.0, headers={"User-Agent": USER_AGENT})
+
+    def _get(url: str) -> httpx.Response:
+        response = http_client.get(url)
+        response.raise_for_status()
+        return response
+
     try:
         points_response = request_with_retry(
-            lambda: http_client.get(POINTS_URL.format(lat=latitude, lon=longitude))
+            lambda: _get(POINTS_URL.format(lat=latitude, lon=longitude))
         )
-        points_response.raise_for_status()
         forecast_url = points_response.json()["properties"]["forecastHourly"]
 
-        forecast_response = request_with_retry(lambda: http_client.get(forecast_url))
-        forecast_response.raise_for_status()
+        forecast_response = request_with_retry(lambda: _get(forecast_url))
         periods = forecast_response.json()["properties"]["periods"]
     finally:
         if owns_client:

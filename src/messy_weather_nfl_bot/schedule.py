@@ -56,13 +56,14 @@ def get_todays_games(
     target_date = date or todays_local_date()
     owns_client = client is None
     http_client = client or httpx.Client(timeout=10.0)
-    try:
-        response = request_with_retry(
-            lambda: http_client.get(
-                SCOREBOARD_URL, params={"dates": target_date.strftime("%Y%m%d")}
-            )
-        )
+
+    def _get() -> httpx.Response:
+        response = http_client.get(SCOREBOARD_URL, params={"dates": target_date.strftime("%Y%m%d")})
         response.raise_for_status()
+        return response
+
+    try:
+        response = request_with_retry(_get)
         payload = response.json()
     finally:
         if owns_client:

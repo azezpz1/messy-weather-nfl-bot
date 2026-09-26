@@ -4,7 +4,6 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot import retry
 from messy_weather_nfl_bot.schedule import SCOREBOARD_URL, get_todays_games, outdoor_games
 
 TARGET_DATE = dt.date(2026, 1, 18)
@@ -13,7 +12,7 @@ TARGET_DATE = dt.date(2026, 1, 18)
 @pytest.fixture(autouse=True)
 def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
     # Keep the test suite fast - backoff timing is covered by tests/unit/test_retry.py.
-    monkeypatch.setattr(retry.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
 
 
 def _event(

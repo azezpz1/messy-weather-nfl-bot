@@ -4,7 +4,6 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot import retry
 from messy_weather_nfl_bot.weather import _parse_wind_speed_mph, _periods_in_window, get_forecast
 
 LAT, LON = 44.5013, -88.0622
@@ -14,7 +13,7 @@ EASTERN = dt.timezone(dt.timedelta(hours=-5))  # EST, matches the fixture period
 @pytest.fixture(autouse=True)
 def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
     # Keep the test suite fast - backoff timing is covered by tests/unit/test_retry.py.
-    monkeypatch.setattr(retry.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
 
 
 @pytest.mark.parametrize(
