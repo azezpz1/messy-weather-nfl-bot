@@ -68,3 +68,44 @@ def test_a_connection_error_is_logged_but_never_raises(caplog: pytest.LogCapture
     healthcheck.ping_start(BASE_URL, "abc-123")  # must not raise
 
     assert "Healthcheck ping" in caplog.text
+
+
+@respx.mock
+def test_a_failed_ping_never_logs_the_secret_bearing_url(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # The ping URL's path is effectively a bearer credential for the check (whoever
+    # has it can forge a check-in) - a failure log must never leak it, including via
+    # the underlying exception's own message (httpx.HTTPStatusError embeds the URL).
+    caplog.set_level(logging.WARNING)
+    respx.get(f"{BASE_URL}/start").mock(return_value=httpx.Response(500))
+
+    healthcheck.ping_start(BASE_URL, "abc-123")
+
+    assert "test-uuid" not in caplog.text
+    assert "hc-ping.com" in caplog.text  # host is fine to log, just not the secret path
+
+
+@respx.mock
+def test_pinging_over_plain_http_logs_a_warning(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING)
+    insecure_url = "http://hc-ping.com/test-uuid"
+    respx.get(f"{insecure_url}/start").mock(return_value=httpx.Response(200))
+
+    healthcheck.ping_start(insecure_url, "abc-123")
+
+    assert "isn't HTTPS" in caplog.text
+    assert "test-uuid" not in caplog.text
+
+
+def test_a_malformed_healthcheck_url_is_logged_but_never_raises(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # httpx.InvalidURL (e.g. from a bad IPv6 host) doesn't subclass httpx.HTTPError,
+    # so this must be caught explicitly - a typo'd HEALTHCHECK_URL must never crash
+    # the whole run.
+    caplog.set_level(logging.WARNING)
+
+    healthcheck.ping_start("https://[bad-ipv6]", "abc-123")  # must not raise
+
+    assert "Healthcheck ping" in caplog.text

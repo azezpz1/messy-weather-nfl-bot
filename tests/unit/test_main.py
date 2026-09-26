@@ -269,7 +269,35 @@ def test_run_summary_is_logged(caplog: pytest.LogCaptureFixture) -> None:
 
     run(platform_names=[], dry_run=True)
 
-    assert "Run summary: 2 game(s) found, 2 outdoor, 2 posted" in caplog.text
+    assert "Run summary: 2 game(s) found, 2 outdoor, 2 evaluated" in caplog.text
+
+
+@respx.mock
+def test_run_summary_is_logged_even_when_no_outdoor_games(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    assert exit_code == EXIT_OK
+    assert "Run summary: 0 game(s) found, 0 outdoor, 0 evaluated" in caplog.text
+
+
+@respx.mock
+def test_run_summary_is_logged_even_when_every_forecast_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=httpx.Response(500))
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=httpx.Response(500))
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    assert exit_code == EXIT_NOTHING_POSTED
+    assert "Run summary: 2 game(s) found, 2 outdoor, 0 evaluated" in caplog.text
 
 
 @respx.mock
@@ -304,7 +332,7 @@ def test_no_healthcheck_url_means_no_pings(monkeypatch: pytest.MonkeyPatch) -> N
     exit_code = main(["--dry-run"])
 
     assert exit_code == EXIT_OK
-    assert not any("hc-ping.com" in str(call.request.url) for call in respx.calls)
+    assert not any(call.request.url.host == "hc-ping.com" for call in respx.calls)
 
 
 @respx.mock
@@ -319,6 +347,26 @@ def test_a_failed_healthcheck_ping_never_changes_the_exit_code(
     exit_code = main(["--dry-run"])
 
     assert exit_code == EXIT_OK
+
+
+@respx.mock
+def test_an_unhandled_exception_still_sends_a_failure_ping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/test-uuid")
+    respx.get("https://hc-ping.com/test-uuid/start").mock(return_value=httpx.Response(200))
+    end_route = respx.post(f"https://hc-ping.com/test-uuid/{EXIT_NOTHING_POSTED}").mock(
+        return_value=httpx.Response(200)
+    )
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.run",
+        lambda platform_names, dry_run: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        main(["--dry-run"])
+
+    assert end_route.called
 
 
 def test_verbose_and_quiet_are_mutually_exclusive() -> None:

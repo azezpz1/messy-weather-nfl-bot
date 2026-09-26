@@ -66,22 +66,23 @@ def _is_retryable(exc: BaseException) -> bool:
     return retry_after is None or retry_after <= MAX_RETRY_AFTER_SECONDS
 
 
-def _log_retry(retry_state: RetryCallState) -> None:
-    exc = retry_state.outcome.exception() if retry_state.outcome else None
-    logger.warning("Retrying request after %s (attempt %d)", exc, retry_state.attempt_number)
-
-
 def request_with_retry(
     request: Callable[[], httpx.Response],
     *,
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     base_delay: float = DEFAULT_BASE_DELAY,
+    describe_exception: Callable[[BaseException], object] = str,
 ) -> httpx.Response:
     """Call `request()` - which must itself call `raise_for_status()` on its response -
     retrying on timeouts, connection errors, 429s, and 5xx responses. A 429's
     `Retry-After` header takes priority over the usual exponential backoff. Re-raises
     the last `httpx.HTTPError` once every attempt is exhausted, so callers see one
     consistent failure mode.
+
+    `describe_exception` renders the exception logged in the retry-attempt warning -
+    override it when the exception's own message could carry something that shouldn't
+    reach the logs (e.g. `httpx.HTTPStatusError` embeds the full request URL, which for
+    some callers doubles as a bearer credential).
     """
     exponential_wait = wait_exponential_jitter(initial=base_delay)
 
@@ -93,6 +94,13 @@ def request_with_retry(
         # _is_retryable already rejects a Retry-After beyond the budget, so this is
         # belt-and-suspenders against ever sleeping past it here too.
         return min(retry_after, MAX_RETRY_AFTER_SECONDS)
+
+    def _log_retry(retry_state: RetryCallState) -> None:
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        described = describe_exception(exc) if exc is not None else None
+        logger.warning(
+            "Retrying request after %s (attempt %d)", described, retry_state.attempt_number
+        )
 
     retryer = Retrying(
         stop=stop_after_attempt(max_attempts),

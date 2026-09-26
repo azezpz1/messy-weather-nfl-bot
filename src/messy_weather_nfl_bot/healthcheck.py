@@ -29,7 +29,28 @@ def new_run_id() -> str:
     return str(uuid.uuid4())
 
 
+def _redact(url: str) -> str:
+    """`url`'s path/UUID doubles as a bearer credential for the check (anyone who has
+    it can forge a check-in) - never let it reach the logs."""
+    try:
+        parsed = httpx.URL(url)
+        return f"{parsed.scheme}://{parsed.host}/***"
+    except Exception:
+        return "<healthcheck URL>"
+
+
+def _describe_error(exc: BaseException) -> str:
+    """A summary of `exc` safe to log - deliberately dropping its own message, since
+    e.g. `httpx.HTTPStatusError` embeds the full (secret-bearing) request URL in it."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"HTTP {exc.response.status_code}"
+    return type(exc).__name__
+
+
 def _ping(url: str, run_id: str, *, method: str = "GET", body: str | None = None) -> None:
+    if not url.lower().startswith("https://"):
+        logger.warning("Healthcheck URL %s isn't HTTPS; pinging over plaintext.", _redact(url))
+
     try:
         with httpx.Client(timeout=PING_TIMEOUT) as client:
 
@@ -40,9 +61,13 @@ def _ping(url: str, run_id: str, *, method: str = "GET", body: str | None = None
                 response.raise_for_status()
                 return response
 
-            request_with_retry(_send, max_attempts=PING_MAX_ATTEMPTS)
-    except httpx.HTTPError as exc:
-        logger.warning("Healthcheck ping to %s failed: %s", url, exc)
+            request_with_retry(
+                _send, max_attempts=PING_MAX_ATTEMPTS, describe_exception=_describe_error
+            )
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
+        # A malformed HEALTHCHECK_URL (InvalidURL) or any transport/status failure -
+        # neither should ever take the whole run down with it.
+        logger.warning("Healthcheck ping to %s failed: %s", _redact(url), _describe_error(exc))
 
 
 def ping_start(base_url: str, run_id: str) -> None:

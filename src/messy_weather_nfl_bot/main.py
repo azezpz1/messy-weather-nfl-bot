@@ -104,6 +104,23 @@ def _weather_detail(weather: WeatherReport) -> str:
     return ", ".join(parts)
 
 
+def _log_run_summary(
+    games_found: int,
+    outdoor_count: int,
+    evaluated_count: int,
+    platforms_posted: list[str],
+    thread_root: str | None,
+) -> None:
+    logger.info(
+        "Run summary: %d game(s) found, %d outdoor, %d evaluated, platforms: %s%s",
+        games_found,
+        outdoor_count,
+        evaluated_count,
+        ", ".join(platforms_posted) or "none",
+        f", thread: {thread_root}" if thread_root else "",
+    )
+
+
 def run(platform_names: list[str], dry_run: bool) -> int:
     date = todays_local_date()
     try:
@@ -146,10 +163,12 @@ def run(platform_names: list[str], dry_run: bool) -> int:
 
     if outdoor_count == 0:
         logger.info("No outdoor NFL games on %s; nothing to post.", date.isoformat())
+        _log_run_summary(len(games), outdoor_count, len(evaluated), [], None)
         return EXIT_OK
 
     if not evaluated:
         logger.error("Forecast unavailable for every outdoor game today; nothing to post.")
+        _log_run_summary(len(games), outdoor_count, len(evaluated), [], None)
         return EXIT_NOTHING_POSTED
 
     ranked = sort_by_messiness(evaluated)
@@ -189,14 +208,7 @@ def run(platform_names: list[str], dry_run: bool) -> int:
     else:
         exit_code = EXIT_OK
 
-    logger.info(
-        "Run summary: %d game(s) found, %d outdoor, %d posted, platforms: %s%s",
-        len(games),
-        outdoor_count,
-        len(evaluated),
-        ", ".join(platforms_posted) or "none",
-        f", thread: {thread_root}" if thread_root else "",
-    )
+    _log_run_summary(len(games), outdoor_count, len(evaluated), platforms_posted, thread_root)
     return exit_code
 
 
@@ -213,7 +225,16 @@ def main(argv: list[str] | None = None) -> int:
     if healthcheck_url:
         healthcheck.ping_start(healthcheck_url, run_id)
 
-    exit_code = run(platform_names, args.dry_run)
+    try:
+        exit_code = run(platform_names, args.dry_run)
+    except BaseException:
+        # An unhandled exception means no completion ping below would ever fire -
+        # Healthchecks would only notice once the run's grace period expires. Report
+        # the failure immediately instead, then let the exception keep propagating.
+        if healthcheck_url:
+            body = f"exit code: unhandled exception\n\n{log_buffer.getvalue()}"
+            healthcheck.ping_end(healthcheck_url, run_id, EXIT_NOTHING_POSTED, body)
+        raise
 
     if healthcheck_url:
         body = f"exit code: {exit_code}\n\n{log_buffer.getvalue()}"
