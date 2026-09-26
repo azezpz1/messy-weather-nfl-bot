@@ -2,10 +2,16 @@ import typing as t
 
 import pytest
 from atproto import Client
-from atproto.exceptions import InvokeTimeoutError, NetworkError
+from atproto.exceptions import InvokeTimeoutError, NetworkError, RateLimitExceededError
+from atproto_client.request import Response
 
 from messy_weather_nfl_bot.poster.base import PartialThreadError, PostRef
-from messy_weather_nfl_bot.poster.bluesky import BlueskyPoster
+from messy_weather_nfl_bot.poster.bluesky import MAX_RATE_LIMIT_WAIT_SECONDS, BlueskyPoster
+
+
+def _rate_limit_error(headers: dict[str, str]) -> RateLimitExceededError:
+    response = Response(success=False, status_code=429, content=None, headers=headers)
+    return RateLimitExceededError(response=response)
 
 
 class _DummyClient:
@@ -59,3 +65,27 @@ def test_post_thread_does_not_retry_a_reply_that_timed_out() -> None:
         poster.post_thread(["root post", "reply"])
 
     assert poster.reply_attempts == 1
+
+
+def test_retry_delay_honors_retry_after_header() -> None:
+    poster = _poster()
+    exc = _rate_limit_error({"retry-after": "12"})
+    assert poster._retry_delay(exc) == 12.0
+
+
+def test_retry_delay_caps_a_long_retry_after_at_the_bound() -> None:
+    poster = _poster()
+    exc = _rate_limit_error({"retry-after": "9999"})
+    assert poster._retry_delay(exc) == MAX_RATE_LIMIT_WAIT_SECONDS
+
+
+def test_retry_delay_is_none_for_a_429_with_no_timing_headers() -> None:
+    poster = _poster()
+    exc = _rate_limit_error({})
+    assert poster._retry_delay(exc) is None
+
+
+def test_retry_delay_is_none_for_non_rate_limit_errors() -> None:
+    poster = _poster()
+    assert poster._retry_delay(NetworkError()) is None
+    assert poster._retry_delay(RuntimeError("unrelated")) is None

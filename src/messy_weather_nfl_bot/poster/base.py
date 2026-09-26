@@ -5,7 +5,13 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_exponential_jitter
+from tenacity import (
+    RetryCallState,
+    Retrying,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 # A couple of retries for a single post()/reply() call - transient network blips
 # shouldn't turn one flaky call into a broken thread that needs a manual resume.
@@ -64,10 +70,23 @@ class SocialMediaPoster(ABC):
         the very duplicate post this retry exists to route around."""
         return True
 
+    def _retry_delay(self, exc: BaseException) -> float | None:
+        """An explicit wait before the next attempt, when `exc` itself says how long
+        (e.g. a rate limit's reset time) - overrides the default exponential backoff.
+        None (the default) means use that backoff instead."""
+        return None
+
     def _retrying(self) -> Retrying:
+        exponential_wait = wait_exponential_jitter(initial=PUBLISH_BASE_DELAY)
+
+        def _wait(retry_state: RetryCallState) -> float:
+            exc = retry_state.outcome.exception() if retry_state.outcome else None
+            delay = self._retry_delay(exc) if exc is not None else None
+            return exponential_wait(retry_state) if delay is None else delay
+
         return Retrying(
             stop=stop_after_attempt(PUBLISH_MAX_ATTEMPTS),
-            wait=wait_exponential_jitter(initial=PUBLISH_BASE_DELAY),
+            wait=_wait,
             retry=retry_if_exception(self._is_retryable),
             reraise=True,
         )

@@ -588,6 +588,47 @@ def test_a_state_write_failure_does_not_change_the_posting_outcome(
 
 
 @respx.mock
+def test_a_state_write_failure_after_a_partial_thread_does_not_escape_run(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Same as above, but for the other call site: recording state after a
+    # PartialThreadError must not let an OSError there propagate out of run() -
+    # the partial-posting outcome already happened for real.
+    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+
+    class FailsAfterRootPost(SocialMediaPoster):
+        def post(self, text: str) -> PostRef:
+            return PostRef(id="root", root_id="root")
+
+        def reply(self, text: str, parent: PostRef) -> PostRef:
+            raise RuntimeError("platform outage")
+
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_posters",
+        lambda platform_names, dry_run: [FailsAfterRootPost()],
+    )
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_post_texts",
+        lambda ranked, date: ["root post", "reply post"],
+    )
+
+    def _broken_record(self, name, posts, *, completed):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("messy_weather_nfl_bot.state.DayState.record", _broken_record)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    exit_code = run(platform_names=["bluesky"], dry_run=False)
+
+    assert exit_code == EXIT_PARTIAL
+    assert "Could not save post state" in caplog.text
+    assert "Partially posted" in caplog.text
+
+
+@respx.mock
 def test_quiet_mode_still_captures_the_run_summary_for_the_healthcheck_body(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

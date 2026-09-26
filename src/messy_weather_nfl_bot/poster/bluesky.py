@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 
 from atproto import Client, models
-from atproto.exceptions import InvokeTimeoutError
+from atproto.exceptions import InvokeTimeoutError, RateLimitExceededError
 
 from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
 
 HANDLE_ENV_VAR = "BLUESKY_HANDLE"
 APP_PASSWORD_ENV_VAR = "BLUESKY_APP_PASSWORD"
+
+# This bot runs from cron with no overall run timeout, so a rate limit's reset time
+# must not be allowed to stall a run indefinitely - fail fast (and let the thread
+# resume on the next run) rather than sleeping past this bound. Mirrors retry.py's
+# own MAX_RETRY_AFTER_SECONDS for the same reason.
+MAX_RATE_LIMIT_WAIT_SECONDS = 30.0
 
 
 class BlueskyPoster(SocialMediaPoster):
@@ -32,6 +39,20 @@ class BlueskyPoster(SocialMediaPoster):
         response: either a definite rejection, or (409/413/502) a status the API
         itself calls safe to retry - so it's fine to retry those."""
         return not isinstance(exc, InvokeTimeoutError)
+
+    def _retry_delay(self, exc: BaseException) -> float | None:
+        """A 429's own requested wait, when it has one - retrying on the default
+        short backoff almost never outlasts an actual rate limit, so those attempts
+        just get burned for nothing."""
+        if not isinstance(exc, RateLimitExceededError):
+            return None
+        if exc.retry_after is not None:
+            wait = exc.retry_after
+        elif exc.reset_at is not None:
+            wait = (exc.reset_at - datetime.now(UTC)).total_seconds()
+        else:
+            return None
+        return max(0.0, min(wait, MAX_RATE_LIMIT_WAIT_SECONDS))
 
     def resume_from(self, posted: list[PostRef]) -> None:
         """Reseed the strong-ref cache `reply()` needs from refs loaded off disk - a
