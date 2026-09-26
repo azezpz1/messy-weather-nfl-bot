@@ -24,7 +24,9 @@ def format_game_line(gw: GameWeather) -> str:
     emoji = EMOJI[gw.condition]
     weather = gw.weather
     kickoff = _format_kickoff(gw.game.kickoff)
-    parts = [f"{weather.short_forecast}", f"{weather.temperature_f}°F"]
+    parts = [f"{weather.short_forecast}"]
+    if weather.temperature_f is not None:
+        parts.append(f"{weather.temperature_f}°F")
     if weather.wind_speed_mph > 0:
         parts.append(f"{weather.wind_speed_mph:g}mph wind")
     return (

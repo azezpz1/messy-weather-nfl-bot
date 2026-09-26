@@ -103,9 +103,21 @@ def test_get_forecast_handles_null_temperature_and_wind_speed() -> None:
 
     assert len(reports) == 2
     incomplete = reports[1]
-    assert incomplete.temperature_f == 0
+    assert incomplete.temperature_f is None  # not a fabricated 0°F
     assert incomplete.wind_speed_mph == 0.0
     assert incomplete.precipitation_probability is None
+
+
+def test_get_forecast_keeps_client_as_the_fourth_positional_argument() -> None:
+    # game_duration must be keyword-only so a positional 4th argument still binds to
+    # client, matching the pre-existing call signature - not to game_duration.
+    import inspect
+
+    params = list(inspect.signature(get_forecast).parameters.values())
+    assert params[3].name == "client"
+    assert params[3].kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+    game_duration_param = inspect.signature(get_forecast).parameters["game_duration"]
+    assert game_duration_param.kind is inspect.Parameter.KEYWORD_ONLY
 
 
 @respx.mock

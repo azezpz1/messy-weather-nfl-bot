@@ -25,7 +25,7 @@ def make_game(home: str = "BUF", away: str = "MIA") -> Game:
 
 def make_weather(
     short_forecast: str = "Sunny",
-    temperature_f: int = 65,
+    temperature_f: int | None = 65,
     wind_speed_mph: float = 5.0,
     precipitation_probability: int | None = 0,
 ) -> WeatherReport:
@@ -145,6 +145,22 @@ def test_evaluate_game_flags_has_snow_even_when_a_later_period_scores_higher() -
 
     assert result.condition == Condition.THUNDERSTORM
     assert result.has_snow is True
+
+
+def test_classify_condition_missing_temperature_is_not_extreme() -> None:
+    # A missing temperature must not be treated as a measured 0°F (extreme cold).
+    weather = make_weather(short_forecast="Sunny", temperature_f=None)
+    assert classify_condition(weather) == Condition.CLEAR
+
+
+def test_messiness_score_excludes_missing_temperature_from_extremity() -> None:
+    missing = make_weather(short_forecast="Sunny", temperature_f=None, wind_speed_mph=0)
+    calm_at_comfortable_temp = make_weather(
+        short_forecast="Sunny", temperature_f=65, wind_speed_mph=0
+    )
+    assert messiness_score(missing, classify_condition(missing)) == messiness_score(
+        calm_at_comfortable_temp, classify_condition(calm_at_comfortable_temp)
+    )
 
 
 def test_sort_by_messiness_keeps_snow_first_when_a_stormier_period_scores_higher() -> None:

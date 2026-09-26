@@ -79,21 +79,24 @@ def classify_condition(weather: WeatherReport) -> Condition:
         return Condition.FOG
     if weather.wind_speed_mph >= HIGH_WIND_MPH:
         return Condition.WIND
-    if weather.temperature_f <= EXTREME_COLD_F:
+    if weather.temperature_f is not None and weather.temperature_f <= EXTREME_COLD_F:
         return Condition.EXTREME_COLD
-    if weather.temperature_f >= EXTREME_HEAT_F:
+    if weather.temperature_f is not None and weather.temperature_f >= EXTREME_HEAT_F:
         return Condition.EXTREME_HEAT
     return Condition.CLEAR
 
 
 def messiness_score(weather: WeatherReport, condition: Condition) -> float:
     """Higher is messier. Combines precipitation odds, wind, temperature extremity,
-    and a bonus for the classified condition."""
+    and a bonus for the classified condition. A missing temperature contributes no
+    extremity rather than being scored as if it were a measured 0°F."""
     precip_component = weather.precipitation_probability or 0
     wind_component = weather.wind_speed_mph * 1.5
-    temp_extremity = max(0, COMFORTABLE_LOW_F - weather.temperature_f) + max(
-        0, weather.temperature_f - COMFORTABLE_HIGH_F
-    )
+    temp_extremity = 0.0
+    if weather.temperature_f is not None:
+        temp_extremity = max(0, COMFORTABLE_LOW_F - weather.temperature_f) + max(
+            0, weather.temperature_f - COMFORTABLE_HIGH_F
+        )
     return precip_component + wind_component + temp_extremity + _CONDITION_SCORE_BONUS[condition]
 
 

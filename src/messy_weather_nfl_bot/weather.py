@@ -23,7 +23,9 @@ _WIND_SPEED_RE = re.compile(r"(\d+)(?:\s*to\s*(\d+))?\s*mph", re.IGNORECASE)
 @dataclass(frozen=True)
 class WeatherReport:
     short_forecast: str
-    temperature_f: int
+    temperature_f: int | None
+    """None if NWS didn't report a temperature for this period - distinct from a measured
+    0°F, which would otherwise be scored as extreme cold."""
     wind_speed_mph: float
     precipitation_probability: int | None
     """Percent chance of precipitation (0-100), or None if NWS didn't report one."""
@@ -59,12 +61,14 @@ def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime
 
 
 def _period_to_report(period: dict) -> WeatherReport:
-    # NWS can report a null temperature/windSpeed for a period with missing data - fall
-    # back to a neutral value rather than letting int()/regex parsing blow up on None.
+    # NWS can report a null temperature/windSpeed for a period with missing data. A null
+    # temperature stays None rather than becoming a fabricated 0°F extreme-cold reading;
+    # windSpeed falls back to calm, which doesn't skew scoring the same way.
     precip = period.get("probabilityOfPrecipitation", {}) or {}
+    temperature = period.get("temperature")
     return WeatherReport(
         short_forecast=period.get("shortForecast", ""),
-        temperature_f=int(period.get("temperature") or 0),
+        temperature_f=int(temperature) if temperature is not None else None,
         wind_speed_mph=_parse_wind_speed_mph(period.get("windSpeed") or ""),
         precipitation_probability=precip.get("value"),
     )
@@ -74,8 +78,9 @@ def get_forecast(
     latitude: float,
     longitude: float,
     kickoff: dt.datetime,
-    game_duration: dt.timedelta = GAME_DURATION,
     client: httpx.Client | None = None,
+    *,
+    game_duration: dt.timedelta = GAME_DURATION,
 ) -> list[WeatherReport]:
     """Fetch hourly forecasts for every period spanning the game, from kickoff through the
     estimated final whistle - so messiness can be judged over the whole game, not just the
