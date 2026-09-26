@@ -61,9 +61,7 @@ def _ping(url: str, run_id: str, *, method: str = "GET", body: str | None = None
         with httpx.Client(timeout=PING_TIMEOUT) as client:
 
             def _send() -> httpx.Response:
-                response = client.request(
-                    method, url, params={"rid": run_id}, content=body
-                )
+                response = client.request(method, url, params={"rid": run_id}, content=body)
                 response.raise_for_status()
                 return response
 

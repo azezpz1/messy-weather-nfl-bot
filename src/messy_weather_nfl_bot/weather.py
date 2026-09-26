@@ -13,7 +13,7 @@ from messy_weather_nfl_bot.retry import request_with_retry
 POINTS_URL = "https://api.weather.gov/points/{lat},{lon}"
 
 # NWS asks API consumers to identify themselves in the User-Agent.
-USER_AGENT = "messy-weather-nfl-bot (https://github.com/azezpz1/messy-weather-nfl-bot)"
+USER_AGENT = "messy-weather-sports-bot (https://github.com/azezpz1/messy-weather-sports-bot)"
 
 # Roughly how long an NFL broadcast runs, kickoff to final whistle. Used to build the
 # window we check for messy weather, since conditions can turn ugly well after kickoff.

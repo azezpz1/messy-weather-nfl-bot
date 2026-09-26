@@ -80,9 +80,7 @@ def _covered_and_international_schedule() -> dict:
 def _mock_hourly_forecast(lat: float, lon: float, *, response: httpx.Response) -> None:
     hourly_url = f"https://api.weather.gov/gridpoints/MOCK-{lat}-{lon}/forecast/hourly"
     respx.get(f"https://api.weather.gov/points/{lat},{lon}").mock(
-        return_value=httpx.Response(
-            200, json={"properties": {"forecastHourly": hourly_url}}
-        )
+        return_value=httpx.Response(200, json={"properties": {"forecastHourly": hourly_url}})
     )
     respx.get(hourly_url).mock(return_value=response)
 
@@ -316,9 +314,7 @@ def test_healthcheck_pings_start_and_end_with_matching_rid(
     start_route = respx.get("https://hc-ping.com/test-uuid/start").mock(
         return_value=httpx.Response(200)
     )
-    end_route = respx.post("https://hc-ping.com/test-uuid/0").mock(
-        return_value=httpx.Response(200)
-    )
+    end_route = respx.post("https://hc-ping.com/test-uuid/0").mock(return_value=httpx.Response(200))
 
     exit_code = main(["--dry-run"])
 

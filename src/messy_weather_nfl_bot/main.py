@@ -55,9 +55,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     verbosity.add_argument(
         "--verbose", action="store_true", help="Log DEBUG-level detail in addition to INFO."
     )
-    verbosity.add_argument(
-        "--quiet", action="store_true", help="Only log warnings and errors."
-    )
+    verbosity.add_argument("--quiet", action="store_true", help="Only log warnings and errors.")
     return parser.parse_args(argv)
 
 
