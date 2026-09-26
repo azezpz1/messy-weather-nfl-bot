@@ -66,12 +66,17 @@ def configure_logging(
     Configures our own logger rather than the root logger, so this can be called
     (and re-called) without disturbing handlers anything else - e.g. a test runner's
     log capture - has attached at the root.
+
+    `--quiet` only raises the console handler's threshold, not the logger's - INFO
+    records (the per-game lines, the run summary) still reach `extra_handlers`, so a
+    healthcheck ping body isn't missing them just because the console stayed quiet.
     """
-    level = logging.DEBUG if verbose else logging.WARNING if quiet else logging.INFO
+    level = logging.DEBUG if verbose else logging.INFO
     logger.setLevel(level)
     logger.handlers.clear()
 
     stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.WARNING if quiet else logging.NOTSET)
     stream_handler.setFormatter(logging.Formatter(LOG_FORMAT))
     logger.addHandler(stream_handler)
 
@@ -105,15 +110,18 @@ def _weather_detail(weather: WeatherReport) -> str:
 
 
 def _log_run_summary(
-    games_found: int,
+    games_found: int | None,
     outdoor_count: int,
     evaluated_count: int,
     platforms_posted: list[str],
     thread_root: str | None,
 ) -> None:
+    """`games_found` is None when the schedule couldn't be fetched at all - every other
+    exit path from `run()` calls this, so the healthcheck completion body always
+    carries a summary line."""
     logger.info(
-        "Run summary: %d game(s) found, %d outdoor, %d evaluated, platforms: %s%s",
-        games_found,
+        "Run summary: %s game(s) found, %d outdoor, %d evaluated, platforms: %s%s",
+        "unavailable" if games_found is None else games_found,
         outdoor_count,
         evaluated_count,
         ", ".join(platforms_posted) or "none",
@@ -127,6 +135,7 @@ def run(platform_names: list[str], dry_run: bool) -> int:
         games = get_todays_games(date)
     except (httpx.HTTPError, ValueError) as exc:
         logger.error("Could not fetch today's NFL schedule: %s", exc)
+        _log_run_summary(None, 0, 0, [], None)
         return EXIT_NOTHING_POSTED
 
     evaluated: list[GameWeather] = []

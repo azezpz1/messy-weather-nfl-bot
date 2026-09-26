@@ -375,16 +375,52 @@ def test_verbose_and_quiet_are_mutually_exclusive() -> None:
 
 
 @pytest.mark.parametrize(
-    ("flags", "expected_level"),
+    ("flags", "expected_logger_level", "expected_console_level"),
     [
-        ([], logging.INFO),
-        (["--verbose"], logging.DEBUG),
-        (["--quiet"], logging.WARNING),
+        ([], logging.INFO, logging.NOTSET),
+        (["--verbose"], logging.DEBUG, logging.NOTSET),
+        # --quiet only raises the console handler's threshold - the logger itself stays
+        # at INFO, so a healthcheck ping body isn't missing the summary just because
+        # the console stayed quiet (see test_quiet_mode_still_captures_the_run_summary).
+        (["--quiet"], logging.INFO, logging.WARNING),
     ],
 )
 def test_configure_logging_sets_the_level_from_cli_flags(
-    flags: list[str], expected_level: int
+    flags: list[str], expected_logger_level: int, expected_console_level: int
 ) -> None:
     args = parse_args(flags)
     configure_logging(verbose=args.verbose, quiet=args.quiet)
-    assert logger.level == expected_level
+    assert logger.level == expected_logger_level
+    assert logger.handlers[0].level == expected_console_level
+
+
+@respx.mock
+def test_run_summary_is_logged_even_when_the_schedule_fetch_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(500))
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    assert exit_code == EXIT_NOTHING_POSTED
+    assert "Run summary: unavailable game(s) found, 0 outdoor, 0 evaluated" in caplog.text
+
+
+@respx.mock
+def test_quiet_mode_still_captures_the_run_summary_for_the_healthcheck_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # --quiet silences the console, but the healthcheck ping body must still carry the
+    # run summary - it's captured by a separate handler on the same (INFO-level) logger.
+    monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/test-uuid")
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
+    respx.get("https://hc-ping.com/test-uuid/start").mock(return_value=httpx.Response(200))
+    end_route = respx.post(f"https://hc-ping.com/test-uuid/{EXIT_OK}").mock(
+        return_value=httpx.Response(200)
+    )
+
+    exit_code = main(["--dry-run", "--quiet"])
+
+    assert exit_code == EXIT_OK
+    assert b"Run summary" in end_route.calls.last.request.content

@@ -99,6 +99,31 @@ def test_pinging_over_plain_http_logs_a_warning(caplog: pytest.LogCaptureFixture
     assert "test-uuid" not in caplog.text
 
 
+@respx.mock
+def test_an_ignored_ping_logs_a_warning_without_raising(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Healthchecks.io returns 200 even for a ping it didn't record (e.g. a stale or
+    # mistyped check UUID), so raise_for_status() alone would never notice.
+    caplog.set_level(logging.WARNING)
+    respx.get(f"{BASE_URL}/start").mock(return_value=httpx.Response(200, text="not found"))
+
+    healthcheck.ping_start(BASE_URL, "abc-123")  # must not raise
+
+    assert "was ignored" in caplog.text
+    assert "test-uuid" not in caplog.text
+
+
+@respx.mock
+def test_a_normal_ok_response_logs_nothing(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING)
+    respx.get(f"{BASE_URL}/start").mock(return_value=httpx.Response(200, text="OK"))
+
+    healthcheck.ping_start(BASE_URL, "abc-123")
+
+    assert caplog.text == ""
+
+
 def test_a_malformed_healthcheck_url_is_logged_but_never_raises(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
