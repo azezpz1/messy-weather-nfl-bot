@@ -9,6 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "atproto>=0.0.72",
     "httpx>=0.28.1",
+    "tenacity>=9.1.4",
 ]
 
 [project.scripts]

@@ -9,6 +9,12 @@ from messy_weather_nfl_bot.schedule import SCOREBOARD_URL, get_todays_games, out
 TARGET_DATE = dt.date(2026, 1, 18)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Keep the test suite fast - backoff timing is covered by tests/unit/test_retry.py.
+    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
+
+
 def _event(
     home: str,
     away: str,
@@ -138,4 +144,25 @@ def test_malformed_events_shape_raises() -> None:
 def test_non_object_event_item_raises() -> None:
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": ["oops"]}))
     with pytest.raises(ValueError, match="expected object"):
+        get_todays_games(TARGET_DATE)
+
+
+@respx.mock
+def test_retries_a_5xx_from_espn_and_still_succeeds() -> None:
+    payload = {"events": [_event("GB", "CHI", "2026-01-18T18:00Z", "Lambeau Field")]}
+    respx.get(SCOREBOARD_URL).mock(
+        side_effect=[httpx.Response(502), httpx.Response(200, json=payload)]
+    )
+
+    games = get_todays_games(TARGET_DATE)
+
+    assert len(games) == 1
+    assert games[0].home_team == "GB"
+
+
+@respx.mock
+def test_raises_after_persistent_5xx_from_espn() -> None:
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(503))
+
+    with pytest.raises(httpx.HTTPStatusError):
         get_todays_games(TARGET_DATE)
