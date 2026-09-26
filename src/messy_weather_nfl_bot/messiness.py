@@ -60,6 +60,10 @@ class GameWeather:
     weather: WeatherReport
     condition: Condition
     score: float
+    has_snow: bool
+    """Whether snow appears in any period across the game, even if a later, higher-scoring
+    period is what's shown as `weather`/`condition` - used to keep snow games ranked
+    first regardless of which period ends up being the messiest one."""
 
 
 def classify_condition(weather: WeatherReport) -> Condition:
@@ -97,18 +101,21 @@ def evaluate_game(game: Game, weather_reports: list[WeatherReport]) -> GameWeath
     """Evaluate every forecast period spanning the game and report the messiest one -
     weather can turn ugly well after kickoff, so the worst point in the game is what
     matters, not just the conditions at the opening whistle."""
+    scored = [(classify_condition(weather), weather) for weather in weather_reports]
+    has_snow = any(condition is Condition.SNOW for condition, _ in scored)
+
     worst: GameWeather | None = None
-    for weather in weather_reports:
-        condition = classify_condition(weather)
+    for condition, weather in scored:
         score = messiness_score(weather, condition)
         if worst is None or score > worst.score:
-            worst = GameWeather(game=game, weather=weather, condition=condition, score=score)
+            worst = GameWeather(
+                game=game, weather=weather, condition=condition, score=score, has_snow=has_snow
+            )
     assert worst is not None  # weather_reports is always non-empty (see get_forecast)
     return worst
 
 
 def sort_by_messiness(games: list[GameWeather]) -> list[GameWeather]:
-    """Snow games always sort first, then everything else by messiness score descending."""
-    return sorted(
-        games, key=lambda gw: (gw.condition is not Condition.SNOW, -gw.score)
-    )
+    """Games with snow at any point sort first, then everything else by messiness score
+    descending - even if a later, stormier period outscored the snow for display."""
+    return sorted(games, key=lambda gw: (not gw.has_snow, -gw.score))

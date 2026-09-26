@@ -59,11 +59,13 @@ def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime
 
 
 def _period_to_report(period: dict) -> WeatherReport:
+    # NWS can report a null temperature/windSpeed for a period with missing data - fall
+    # back to a neutral value rather than letting int()/regex parsing blow up on None.
     precip = period.get("probabilityOfPrecipitation", {}) or {}
     return WeatherReport(
         short_forecast=period.get("shortForecast", ""),
-        temperature_f=int(period.get("temperature", 0)),
-        wind_speed_mph=_parse_wind_speed_mph(period.get("windSpeed", "")),
+        temperature_f=int(period.get("temperature") or 0),
+        wind_speed_mph=_parse_wind_speed_mph(period.get("windSpeed") or ""),
         precipitation_probability=precip.get("value"),
     )
 

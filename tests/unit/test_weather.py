@@ -81,6 +81,34 @@ def test_get_forecast_covers_the_whole_game_not_just_kickoff() -> None:
 
 
 @respx.mock
+def test_get_forecast_handles_null_temperature_and_wind_speed() -> None:
+    # NWS's hourly endpoint can report null temperature/windSpeed for a period with
+    # missing data - that shouldn't blow up parsing or suppress every other report.
+    periods = [
+        _hourly_period("2026-01-18T18:00:00-05:00", "Sunny", 35, "5 mph", 0),
+        {
+            "startTime": "2026-01-18T19:00:00-05:00",
+            "endTime": "2026-01-18T20:00:00-05:00",
+            "isDaytime": True,
+            "shortForecast": "Data Unavailable",
+            "temperature": None,
+            "windSpeed": None,
+            "probabilityOfPrecipitation": {"value": None},
+        },
+    ]
+    _mock_forecast(periods)
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+
+    reports = get_forecast(LAT, LON, kickoff, game_duration=dt.timedelta(hours=2))
+
+    assert len(reports) == 2
+    incomplete = reports[1]
+    assert incomplete.temperature_f == 0
+    assert incomplete.wind_speed_mph == 0.0
+    assert incomplete.precipitation_probability is None
+
+
+@respx.mock
 def test_get_forecast_falls_back_to_first_daytime_period_if_none_cover_the_game_window() -> None:
     periods = [
         _hourly_period(
