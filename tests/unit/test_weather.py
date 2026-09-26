@@ -198,9 +198,7 @@ def test_get_forecast_retries_a_503_from_nws_and_still_succeeds() -> None:
 def test_get_forecast_raises_after_persistent_5xx_from_nws() -> None:
     # If every retry is also a 5xx, the caller (main.run) needs a clean, catchable error
     # rather than the retry wrapper swallowing the failure forever.
-    respx.get(f"https://api.weather.gov/points/{LAT},{LON}").mock(
-        return_value=httpx.Response(500)
-    )
+    respx.get(f"https://api.weather.gov/points/{LAT},{LON}").mock(return_value=httpx.Response(500))
     kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
 
     with pytest.raises(httpx.HTTPStatusError):

@@ -202,9 +202,7 @@ def test_skip_reason_names_a_covered_stadium() -> None:
 
 def test_skip_reason_names_an_international_venue() -> None:
     game = _game("JAX", "PHI", "Tottenham Hotspur Stadium")
-    assert skip_reason(game) == (
-        'international/neutral-site venue "Tottenham Hotspur Stadium"'
-    )
+    assert skip_reason(game) == ('international/neutral-site venue "Tottenham Hotspur Stadium"')
 
 
 def test_skip_reason_names_an_unrecognized_team() -> None:
