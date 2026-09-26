@@ -4,10 +4,17 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot.weather import _parse_wind_speed_mph, get_forecast
+from messy_weather_nfl_bot import retry
+from messy_weather_nfl_bot.weather import _parse_wind_speed_mph, _periods_in_window, get_forecast
 
 LAT, LON = 44.5013, -88.0622
 EASTERN = dt.timezone(dt.timedelta(hours=-5))  # EST, matches the fixture period offsets below
+
+
+@pytest.fixture(autouse=True)
+def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Keep the test suite fast - backoff timing is covered by tests/unit/test_retry.py.
+    monkeypatch.setattr(retry.time, "sleep", lambda seconds: None)
 
 
 @pytest.mark.parametrize(
@@ -153,3 +160,49 @@ def test_get_forecast_falls_back_to_first_period_if_none_are_daytime_or_cover_th
     assert len(reports) == 1
     assert reports[0].short_forecast == "Overnight Clear"
     assert reports[0].precipitation_probability is None
+
+
+def test_periods_in_window_raises_a_clear_error_on_an_empty_list() -> None:
+    now = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+    with pytest.raises(ValueError, match="no forecast periods"):
+        _periods_in_window([], now, now + dt.timedelta(hours=1))
+
+
+@respx.mock
+def test_get_forecast_retries_a_503_from_nws_and_still_succeeds() -> None:
+    # api.weather.gov intermittently returns 503s - a single transient failure shouldn't
+    # drop the game from the report.
+    points_payload = {
+        "properties": {
+            "forecastHourly": "https://api.weather.gov/gridpoints/GRB/1,1/forecast/hourly"
+        }
+    }
+    respx.get(f"https://api.weather.gov/points/{LAT},{LON}").mock(
+        return_value=httpx.Response(200, json=points_payload)
+    )
+    periods = [_hourly_period("2026-01-18T18:00:00-05:00", "Sunny", 35, "5 mph", 0)]
+    respx.get("https://api.weather.gov/gridpoints/GRB/1,1/forecast/hourly").mock(
+        side_effect=[
+            httpx.Response(503),
+            httpx.Response(200, json={"properties": {"periods": periods}}),
+        ]
+    )
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+
+    reports = get_forecast(LAT, LON, kickoff)
+
+    assert len(reports) == 1
+    assert reports[0].short_forecast == "Sunny"
+
+
+@respx.mock
+def test_get_forecast_raises_after_persistent_5xx_from_nws() -> None:
+    # If every retry is also a 5xx, the caller (main.run) needs a clean, catchable error
+    # rather than the retry wrapper swallowing the failure forever.
+    respx.get(f"https://api.weather.gov/points/{LAT},{LON}").mock(
+        return_value=httpx.Response(500)
+    )
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        get_forecast(LAT, LON, kickoff)

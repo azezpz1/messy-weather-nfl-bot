@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 import httpx
 
+from messy_weather_nfl_bot.retry import request_with_retry
+
 POINTS_URL = "https://api.weather.gov/points/{lat},{lon}"
 
 # NWS asks API consumers to identify themselves in the User-Agent.
@@ -46,6 +48,8 @@ def _parse_wind_speed_mph(wind_speed: str) -> float:
 def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime) -> list[dict]:
     """Return every forecast period overlapping [start, end), falling back to the soonest
     daytime period (then the first period) if none overlap at all."""
+    if not periods:
+        raise ValueError("NWS returned no forecast periods")
     covering = [
         period
         for period in periods
@@ -88,11 +92,13 @@ def get_forecast(
     owns_client = client is None
     http_client = client or httpx.Client(timeout=10.0, headers={"User-Agent": USER_AGENT})
     try:
-        points_response = http_client.get(POINTS_URL.format(lat=latitude, lon=longitude))
+        points_response = request_with_retry(
+            lambda: http_client.get(POINTS_URL.format(lat=latitude, lon=longitude))
+        )
         points_response.raise_for_status()
         forecast_url = points_response.json()["properties"]["forecastHourly"]
 
-        forecast_response = http_client.get(forecast_url)
+        forecast_response = request_with_retry(lambda: http_client.get(forecast_url))
         forecast_response.raise_for_status()
         periods = forecast_response.json()["properties"]["periods"]
     finally:

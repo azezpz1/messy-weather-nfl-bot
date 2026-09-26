@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from messy_weather_nfl_bot.retry import request_with_retry
 from messy_weather_nfl_bot.stadiums import StadiumInfo, stadium_for_team
 
 SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
@@ -56,8 +57,10 @@ def get_todays_games(
     owns_client = client is None
     http_client = client or httpx.Client(timeout=10.0)
     try:
-        response = http_client.get(
-            SCOREBOARD_URL, params={"dates": target_date.strftime("%Y%m%d")}
+        response = request_with_retry(
+            lambda: http_client.get(
+                SCOREBOARD_URL, params={"dates": target_date.strftime("%Y%m%d")}
+            )
         )
         response.raise_for_status()
         payload = response.json()
