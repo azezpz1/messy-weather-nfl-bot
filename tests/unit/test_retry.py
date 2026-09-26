@@ -171,3 +171,19 @@ def test_request_with_retry_sleeps_for_the_retry_after_header_on_a_429(
 
     assert response.status_code == 200
     assert sleeps == [5.0]
+
+
+def test_does_not_retry_a_429_whose_retry_after_exceeds_the_budget() -> None:
+    # This bot runs from cron with no overall timeout - honoring an hour-long
+    # Retry-After would stall the run instead of degrading gracefully.
+    attempts = 0
+
+    def request() -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return _get_and_raise(_response(429, {"Retry-After": "3600"}))
+
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        request_with_retry(request)
+    assert attempts == 1
+    assert exc_info.value.response.status_code == 429

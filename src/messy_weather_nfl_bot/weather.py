@@ -92,6 +92,16 @@ def _forecast_periods(forecast_payload: object) -> list[dict]:
         raise ValueError(
             f"Unexpected NWS forecast response shape: expected 'periods' list, got {kind}"
         )
+    for period in periods:
+        if (
+            not isinstance(period, dict)
+            or not isinstance(period.get("startTime"), str)
+            or not isinstance(period.get("endTime"), str)
+        ):
+            raise ValueError(
+                "Unexpected NWS forecast response shape: a period is missing a "
+                "string 'startTime'/'endTime'"
+            )
     return periods
 
 

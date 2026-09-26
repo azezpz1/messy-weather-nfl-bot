@@ -239,3 +239,50 @@ def test_get_forecast_raises_a_clean_error_on_a_malformed_forecast_response() ->
 
     with pytest.raises(ValueError, match="periods"):
         get_forecast(LAT, LON, kickoff)
+
+
+@respx.mock
+def test_get_forecast_raises_a_clean_error_on_a_period_missing_start_time() -> None:
+    # A period that isn't a well-formed mapping with startTime/endTime would otherwise
+    # raise a raw KeyError/TypeError from _periods_in_window, which main.run's per-game
+    # handler doesn't catch.
+    respx.get(f"https://api.weather.gov/points/{LAT},{LON}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "properties": {
+                    "forecastHourly": "https://api.weather.gov/gridpoints/GRB/1,1/forecast/hourly"
+                }
+            },
+        )
+    )
+    respx.get("https://api.weather.gov/gridpoints/GRB/1,1/forecast/hourly").mock(
+        return_value=httpx.Response(
+            200, json={"properties": {"periods": [{"shortForecast": "Sunny"}]}}
+        )
+    )
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+
+    with pytest.raises(ValueError, match="startTime"):
+        get_forecast(LAT, LON, kickoff)
+
+
+@respx.mock
+def test_get_forecast_raises_a_clean_error_on_a_non_object_period() -> None:
+    respx.get(f"https://api.weather.gov/points/{LAT},{LON}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "properties": {
+                    "forecastHourly": "https://api.weather.gov/gridpoints/GRB/1,1/forecast/hourly"
+                }
+            },
+        )
+    )
+    respx.get("https://api.weather.gov/gridpoints/GRB/1,1/forecast/hourly").mock(
+        return_value=httpx.Response(200, json={"properties": {"periods": ["not an object"]}})
+    )
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+
+    with pytest.raises(ValueError, match="startTime"):
+        get_forecast(LAT, LON, kickoff)

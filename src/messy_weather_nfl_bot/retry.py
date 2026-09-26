@@ -26,15 +26,12 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_BASE_DELAY = 0.25
 
+# This bot runs from cron with no overall run timeout, so a server-requested
+# Retry-After (e.g. an hour) must not be allowed to stall a run indefinitely - fail
+# fast instead of honoring a wait beyond this bound.
+MAX_RETRY_AFTER_SECONDS = 30.0
+
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
-
-
-def _is_retryable(exc: BaseException) -> bool:
-    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
-        return True
-    if not isinstance(exc, httpx.HTTPStatusError):
-        return False
-    return exc.response.status_code in RETRYABLE_STATUS_CODES
 
 
 def _retry_after_seconds(exc: BaseException) -> float | None:
@@ -54,6 +51,19 @@ def _retry_after_seconds(exc: BaseException) -> float | None:
     if retry_at.tzinfo is None:
         retry_at = retry_at.replace(tzinfo=UTC)
     return max((retry_at - datetime.now(UTC)).total_seconds(), 0.0)
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    if isinstance(exc, (httpx.TimeoutException, httpx.TransportError)):
+        return True
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return False
+    if exc.response.status_code != 429:
+        return exc.response.status_code in RETRYABLE_STATUS_CODES
+    # A Retry-After beyond our budget means the server wants a wait this bot can't
+    # afford - fail fast rather than sleeping past MAX_RETRY_AFTER_SECONDS.
+    retry_after = _retry_after_seconds(exc)
+    return retry_after is None or retry_after <= MAX_RETRY_AFTER_SECONDS
 
 
 def _log_retry(retry_state: RetryCallState) -> None:
@@ -78,7 +88,11 @@ def request_with_retry(
     def _wait(retry_state: RetryCallState) -> float:
         exc = retry_state.outcome.exception() if retry_state.outcome else None
         retry_after = _retry_after_seconds(exc) if exc is not None else None
-        return exponential_wait(retry_state) if retry_after is None else retry_after
+        if retry_after is None:
+            return exponential_wait(retry_state)
+        # _is_retryable already rejects a Retry-After beyond the budget, so this is
+        # belt-and-suspenders against ever sleeping past it here too.
+        return min(retry_after, MAX_RETRY_AFTER_SECONDS)
 
     retryer = Retrying(
         stop=stop_after_attempt(max_attempts),
