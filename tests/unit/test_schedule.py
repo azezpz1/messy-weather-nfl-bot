@@ -4,7 +4,14 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot.schedule import SCOREBOARD_URL, get_todays_games, outdoor_games
+from messy_weather_nfl_bot.schedule import (
+    SCOREBOARD_URL,
+    Game,
+    get_todays_games,
+    outdoor_games,
+    skip_reason,
+)
+from messy_weather_nfl_bot.stadiums import stadium_for_team
 
 TARGET_DATE = dt.date(2026, 1, 18)
 
@@ -166,3 +173,40 @@ def test_raises_after_persistent_5xx_from_espn() -> None:
 
     with pytest.raises(httpx.HTTPStatusError):
         get_todays_games(TARGET_DATE)
+
+
+def _game(home: str, away: str, venue_name: str) -> Game:
+    return Game(
+        home_team=home,
+        away_team=away,
+        kickoff=dt.datetime(2026, 1, 18, 18, 0, tzinfo=dt.UTC),
+        stadium=stadium_for_team(home) if home in {"MIN", "GB"} else None,
+        venue_name=venue_name,
+    )
+
+
+def test_skip_reason_is_none_for_an_outdoor_game() -> None:
+    assert skip_reason(_game("GB", "CHI", "Lambeau Field")) is None
+
+
+def test_skip_reason_names_a_covered_stadium() -> None:
+    game = Game(
+        home_team="MIN",
+        away_team="DET",
+        kickoff=dt.datetime(2026, 1, 18, 18, 0, tzinfo=dt.UTC),
+        stadium=stadium_for_team("MIN"),
+        venue_name="U.S. Bank Stadium",
+    )
+    assert skip_reason(game) == "covered stadium (U.S. Bank Stadium)"
+
+
+def test_skip_reason_names_an_international_venue() -> None:
+    game = _game("JAX", "PHI", "Tottenham Hotspur Stadium")
+    assert skip_reason(game) == (
+        'international/neutral-site venue "Tottenham Hotspur Stadium"'
+    )
+
+
+def test_skip_reason_names_an_unrecognized_team() -> None:
+    game = _game("XYZ", "PHI", "Some Stadium")
+    assert skip_reason(game) == "unrecognized home team 'XYZ'"

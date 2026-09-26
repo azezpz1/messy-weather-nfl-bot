@@ -25,6 +25,9 @@ class Game:
     stadium: StadiumInfo | None
     """None when the venue isn't a recognized, fixed home stadium (e.g. a neutral-site
     or international game) and weather can't be looked up for it."""
+    venue_name: str = ""
+    """The raw venue name ESPN reported, kept for logging when `stadium` is None or
+    covered even though it isn't otherwise needed once `stadium` has been resolved."""
 
 
 def todays_local_date(now: dt.datetime | None = None) -> dt.date:
@@ -108,7 +111,13 @@ def get_todays_games(
         )
 
         games.append(
-            Game(home_team=home_team, away_team=away_team, kickoff=kickoff, stadium=stadium)
+            Game(
+                home_team=home_team,
+                away_team=away_team,
+                kickoff=kickoff,
+                stadium=stadium,
+                venue_name=venue.get("fullName", ""),
+            )
         )
 
     return games
@@ -117,3 +126,16 @@ def get_todays_games(
 def outdoor_games(games: list[Game]) -> list[Game]:
     """Games with a known, uncovered stadium - the only ones weather applies to."""
     return [g for g in games if g.stadium is not None and not g.stadium.is_covered]
+
+
+def skip_reason(game: Game) -> str | None:
+    """Why `game` isn't a candidate for a weather lookup, or None if it is one."""
+    if game.stadium is None:
+        try:
+            stadium_for_team(game.home_team)
+        except KeyError:
+            return f"unrecognized home team {game.home_team!r}"
+        return f'international/neutral-site venue "{game.venue_name}"'
+    if game.stadium.is_covered:
+        return f"covered stadium ({game.stadium.name})"
+    return None

@@ -3,17 +3,26 @@
 from __future__ import annotations
 
 import argparse
+import io
+import logging
+import os
 import sys
+from collections.abc import Sequence
 
 import httpx
 
-from messy_weather_nfl_bot.formatting import build_post_texts
-from messy_weather_nfl_bot.messiness import evaluate_game, sort_by_messiness
+from messy_weather_nfl_bot import healthcheck
+from messy_weather_nfl_bot.formatting import build_post_texts, format_kickoff
+from messy_weather_nfl_bot.messiness import GameWeather, evaluate_game, sort_by_messiness
 from messy_weather_nfl_bot.poster import POSTERS
 from messy_weather_nfl_bot.poster.base import PartialThreadError, SocialMediaPoster
 from messy_weather_nfl_bot.poster.console import ConsolePoster
-from messy_weather_nfl_bot.schedule import Game, get_todays_games, outdoor_games, todays_local_date
+from messy_weather_nfl_bot.schedule import get_todays_games, skip_reason, todays_local_date
 from messy_weather_nfl_bot.weather import WeatherReport, get_forecast
+
+logger = logging.getLogger("messy_weather_nfl_bot")
+
+LOG_FORMAT = "%(asctime)s %(levelname)-8s %(message)s"
 
 # So cron wrappers and health checks can tell "nothing posted" from "posted, but
 # degraded" from a clean run.
@@ -34,7 +43,41 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print what would be posted instead of posting to any real platform.",
     )
+    verbosity = parser.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "--verbose", action="store_true", help="Log DEBUG-level detail in addition to INFO."
+    )
+    verbosity.add_argument(
+        "--quiet", action="store_true", help="Only log warnings and errors."
+    )
     return parser.parse_args(argv)
+
+
+def configure_logging(
+    *,
+    verbose: bool = False,
+    quiet: bool = False,
+    extra_handlers: Sequence[logging.Handler] = (),
+) -> None:
+    """Set up this package's logger: INFO by default, with timestamps so cron logs are
+    readable. `extra_handlers` (e.g. one writing into an in-memory buffer for a
+    healthcheck ping body) are attached alongside the default stream handler.
+
+    Configures our own logger rather than the root logger, so this can be called
+    (and re-called) without disturbing handlers anything else - e.g. a test runner's
+    log capture - has attached at the root.
+    """
+    level = logging.DEBUG if verbose else logging.WARNING if quiet else logging.INFO
+    logger.setLevel(level)
+    logger.handlers.clear()
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    logger.addHandler(stream_handler)
+
+    for handler in extra_handlers:
+        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        logger.addHandler(handler)
 
 
 def build_posters(platform_names: list[str], dry_run: bool) -> list[SocialMediaPoster]:
@@ -52,19 +95,13 @@ def build_posters(platform_names: list[str], dry_run: bool) -> list[SocialMediaP
     return posters
 
 
-def _fetch_forecast_or_none(game: Game) -> list[WeatherReport] | None:
-    """Fetch `game`'s forecast, or None (after logging why) if it still can't be fetched
-    once `get_forecast`'s own retries are exhausted - one bad stadium shouldn't sink the
-    whole run."""
-    assert game.stadium is not None  # guaranteed by outdoor_games()
-    try:
-        return get_forecast(game.stadium.latitude, game.stadium.longitude, game.kickoff)
-    except (httpx.HTTPError, ValueError) as exc:
-        print(
-            f"Skipping {game.away_team} @ {game.home_team}: forecast unavailable ({exc})",
-            file=sys.stderr,
-        )
-        return None
+def _weather_detail(weather: WeatherReport) -> str:
+    parts = [weather.short_forecast]
+    if weather.temperature_f is not None:
+        parts.append(f"{weather.temperature_f}°F")
+    if weather.wind_speed_mph > 0:
+        parts.append(f"{weather.wind_speed_mph:g}mph")
+    return ", ".join(parts)
 
 
 def run(platform_names: list[str], dry_run: bool) -> int:
@@ -72,63 +109,117 @@ def run(platform_names: list[str], dry_run: bool) -> int:
     try:
         games = get_todays_games(date)
     except (httpx.HTTPError, ValueError) as exc:
-        print(f"Could not fetch today's NFL schedule: {exc}", file=sys.stderr)
+        logger.error("Could not fetch today's NFL schedule: %s", exc)
         return EXIT_NOTHING_POSTED
 
-    candidates = outdoor_games(games)
-    if not candidates:
-        print(f"No outdoor NFL games on {date.isoformat()}; nothing to post.")
+    evaluated: list[GameWeather] = []
+    outdoor_count = 0
+    games_missing = 0
+    for game in games:
+        matchup = f"{game.away_team} @ {game.home_team}"
+        reason = skip_reason(game)
+        if reason is not None:
+            logger.info("%s — skipped: %s", matchup, reason)
+            continue
+
+        outdoor_count += 1
+        assert game.stadium is not None  # guaranteed by skip_reason() returning None above
+        try:
+            forecasts = get_forecast(game.stadium.latitude, game.stadium.longitude, game.kickoff)
+        except (httpx.HTTPError, ValueError) as exc:
+            games_missing += 1
+            logger.info("%s — skipped: forecast unavailable (%s)", matchup, exc)
+            continue
+
+        gw = evaluate_game(game, forecasts)
+        evaluated.append(gw)
+        period_word = "period" if len(forecasts) == 1 else "periods"
+        logger.info(
+            "%s %s — included: score %.1f (%s) across %d hourly %s",
+            matchup,
+            format_kickoff(game.kickoff),
+            gw.score,
+            _weather_detail(gw.weather),
+            len(forecasts),
+            period_word,
+        )
+
+    if outdoor_count == 0:
+        logger.info("No outdoor NFL games on %s; nothing to post.", date.isoformat())
         return EXIT_OK
 
-    evaluated = []
-    games_missing = 0
-    for game in candidates:
-        forecasts = _fetch_forecast_or_none(game)
-        if forecasts is None:
-            games_missing += 1
-            continue
-        evaluated.append(evaluate_game(game, forecasts))
-
     if not evaluated:
-        print(
-            "Forecast unavailable for every outdoor game today; nothing to post.",
-            file=sys.stderr,
-        )
+        logger.error("Forecast unavailable for every outdoor game today; nothing to post.")
         return EXIT_NOTHING_POSTED
 
     ranked = sort_by_messiness(evaluated)
     post_texts = build_post_texts(ranked, date)
     posters = build_posters(platform_names, dry_run)
 
+    platforms_posted: list[str] = []
     platforms_failed = 0
     platforms_degraded = 0
+    thread_root: str | None = None
     for poster in posters:
+        platform = type(poster).__name__
         try:
-            poster.post_thread(post_texts)
+            refs = poster.post_thread(post_texts)
+            platforms_posted.append(platform)
+            if refs and thread_root is None:
+                thread_root = refs[0].id
         except PartialThreadError as exc:
             # Some posts in the thread went out before it failed - not "nothing
             # posted", but still worth flagging as degraded.
             platforms_degraded += 1
-            print(
-                f"Partially posted to {type(poster).__name__} "
-                f"({len(exc.posted)}/{len(post_texts)} posts before failing): {exc}",
-                file=sys.stderr,
+            logger.warning(
+                "Partially posted to %s (%d/%d posts before failing): %s",
+                platform,
+                len(exc.posted),
+                len(post_texts),
+                exc,
             )
         except Exception as exc:  # isolate one platform's outage from the rest
             platforms_failed += 1
-            print(f"Failed to post to {type(poster).__name__}: {exc}", file=sys.stderr)
+            logger.error("Failed to post to %s: %s", platform, exc)
 
     if platforms_failed == len(posters):
-        return EXIT_NOTHING_POSTED
-    if games_missing or platforms_failed or platforms_degraded:
-        return EXIT_PARTIAL
-    return EXIT_OK
+        exit_code = EXIT_NOTHING_POSTED
+    elif games_missing or platforms_failed or platforms_degraded:
+        exit_code = EXIT_PARTIAL
+    else:
+        exit_code = EXIT_OK
+
+    logger.info(
+        "Run summary: %d game(s) found, %d outdoor, %d posted, platforms: %s%s",
+        len(games),
+        outdoor_count,
+        len(evaluated),
+        ", ".join(platforms_posted) or "none",
+        f", thread: {thread_root}" if thread_root else "",
+    )
+    return exit_code
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    log_buffer = io.StringIO()
+    configure_logging(
+        verbose=args.verbose, quiet=args.quiet, extra_handlers=[logging.StreamHandler(log_buffer)]
+    )
     platform_names = [p.strip() for p in args.platforms.split(",") if p.strip()]
-    return run(platform_names, args.dry_run)
+
+    healthcheck_url = os.environ.get(healthcheck.ENV_VAR)
+    run_id = healthcheck.new_run_id()
+    if healthcheck_url:
+        healthcheck.ping_start(healthcheck_url, run_id)
+
+    exit_code = run(platform_names, args.dry_run)
+
+    if healthcheck_url:
+        body = f"exit code: {exit_code}\n\n{log_buffer.getvalue()}"
+        healthcheck.ping_end(healthcheck_url, run_id, exit_code, body)
+
+    return exit_code
 
 
 if __name__ == "__main__":

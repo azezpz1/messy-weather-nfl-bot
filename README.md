@@ -32,6 +32,7 @@ variables:
 | ------------------------ | ---------------------------------------------- |
 | `BLUESKY_HANDLE`         | Your Bluesky handle, e.g. `example.bsky.social` |
 | `BLUESKY_APP_PASSWORD`   | An app password (not your account password)     |
+| `HEALTHCHECK_URL`        | Optional [Healthchecks.io](#failure-alerting-with-healthchecksio) ping URL |
 
 ## Running
 
@@ -44,7 +45,44 @@ uv run messy-weather-nfl-bot
 
 # Post to multiple platforms at once (as more are added):
 uv run messy-weather-nfl-bot --platforms bluesky
+
+# More or less log detail:
+uv run messy-weather-nfl-bot --verbose   # DEBUG-level detail too
+uv run messy-weather-nfl-bot --quiet     # only warnings and errors
 ```
+
+Every run logs why each game found for the day was included or skipped (a
+covered stadium, an international/neutral-site venue, or a forecast that
+couldn't be fetched), followed by a one-line summary. Logs go to stderr with
+timestamps, so they're readable from cron/journald logs.
+
+### Failure alerting with Healthchecks.io
+
+The bot's own logs only help if something reads them. Since it normally runs
+unattended from cron, a silent failure — bad credentials, an API change, the
+Pi being off — can go unnoticed for weeks. [Healthchecks.io](https://healthchecks.io)
+is a free "dead man's switch": the bot pings it on every run, and *you* get
+alerted if an expected ping doesn't show up, not just when the bot itself
+detects a problem.
+
+To set it up:
+
+1. Create a free Healthchecks.io account (or [self-host it](https://github.com/healthchecks/healthchecks)
+   somewhere other than the Pi it's watching).
+2. Add a check using the **same cron schedule and timezone as your crontab**
+   (e.g. `0 9 * * 0,1,4` in `America/New_York`), with a grace period (e.g. 60
+   minutes) to allow for a slow run.
+3. Connect an alert channel (email, Discord, Slack, ntfy, Pushover, etc.).
+4. Copy the check's ping URL (`https://hc-ping.com/<uuid>`) into
+   `HEALTHCHECK_URL`, in your crontab or `.env`.
+
+With `HEALTHCHECK_URL` set, the bot pings `{url}/start` when a run begins and
+`{url}/{exit_code}` when it ends (carrying the run summary and log tail as
+the ping body) — `0` means success, anything else is a failure, reusing this
+bot's own exit codes. Days with no outdoor games still ping success, so they
+don't look like a missed run. A failed ping is logged but never affects the
+run's outcome — the bot doesn't need `HEALTHCHECK_URL` set at all, and
+nothing is pinged if it's unset.
 
 ## Running on a schedule (e.g. a Raspberry Pi)
 
@@ -60,9 +98,11 @@ Thursdays, Sundays, and Mondays:
 ```
 
 Cron does not load your shell profile or `.env` files automatically, so
-`BLUESKY_HANDLE` and `BLUESKY_APP_PASSWORD` won't be set unless you provide
-them explicitly: set them directly in the crontab, or in a wrapper script
-that exports them before invoking `uv`.
+`BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD`, and `HEALTHCHECK_URL` won't be set
+unless you provide them explicitly: set them directly in the crontab, or in
+a wrapper script that exports them before invoking `uv`. If you're using
+Healthchecks.io, match the check's schedule and timezone to whatever cron
+expression you use here.
 
 ### Updating to the latest release
 
