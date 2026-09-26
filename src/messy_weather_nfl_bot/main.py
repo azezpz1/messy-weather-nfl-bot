@@ -47,8 +47,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--force",
         action="store_true",
         help=(
-            "Repost even if today's thread already finished on a platform, ignoring "
-            "saved state."
+            "Repost even if today's thread already finished on a platform, ignoring saved state."
         ),
     )
     verbosity = parser.add_mutually_exclusive_group()

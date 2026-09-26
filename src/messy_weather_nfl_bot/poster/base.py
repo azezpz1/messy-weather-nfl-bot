@@ -91,9 +91,7 @@ class SocialMediaPoster(ABC):
             reraise=True,
         )
 
-    def post_thread(
-        self, texts: list[str], resume: list[PostRef] | None = None
-    ) -> list[PostRef]:
+    def post_thread(self, texts: list[str], resume: list[PostRef] | None = None) -> list[PostRef]:
         """Post `texts` as a thread: the first as a root post, the rest as chained replies.
 
         `resume` is a prefix of `texts` already published in an earlier, interrupted
