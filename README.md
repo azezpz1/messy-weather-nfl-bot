@@ -94,6 +94,17 @@ checking out unreleased commits from `main`. If you're hitting GitHub's
 unauthenticated API rate limit, set a `GITHUB_TOKEN` env var (no special
 permissions needed) and the script will use it.
 
+Rather than running it inline before every scheduled post, you can instead
+give it its own crontab entry so the checkout is refreshed ahead of time —
+for example, Saturday at midnight so it's ready before the Sunday morning
+run:
+
+```cron
+# m h  dom mon dow          command
+0  0   *   *   6            cd /path/to/messy-weather-nfl-bot && ./scripts/update-to-latest-release.sh >> update-to-latest-release.log 2>&1
+0  9   *   *   0,1,4        cd /path/to/messy-weather-nfl-bot && uv run messy-weather-nfl-bot
+```
+
 ## Development
 
 ```sh
