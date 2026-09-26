@@ -10,7 +10,7 @@ import httpx
 from messy_weather_nfl_bot.formatting import build_post_texts
 from messy_weather_nfl_bot.messiness import evaluate_game, sort_by_messiness
 from messy_weather_nfl_bot.poster import POSTERS
-from messy_weather_nfl_bot.poster.base import SocialMediaPoster
+from messy_weather_nfl_bot.poster.base import PartialThreadError, SocialMediaPoster
 from messy_weather_nfl_bot.poster.console import ConsolePoster
 from messy_weather_nfl_bot.schedule import Game, get_todays_games, outdoor_games, todays_local_date
 from messy_weather_nfl_bot.weather import WeatherReport, get_forecast
@@ -101,16 +101,26 @@ def run(platform_names: list[str], dry_run: bool) -> int:
     posters = build_posters(platform_names, dry_run)
 
     platforms_failed = 0
+    platforms_degraded = 0
     for poster in posters:
         try:
             poster.post_thread(post_texts)
+        except PartialThreadError as exc:
+            # Some posts in the thread went out before it failed - not "nothing
+            # posted", but still worth flagging as degraded.
+            platforms_degraded += 1
+            print(
+                f"Partially posted to {type(poster).__name__} "
+                f"({len(exc.posted)}/{len(post_texts)} posts before failing): {exc}",
+                file=sys.stderr,
+            )
         except Exception as exc:  # isolate one platform's outage from the rest
             platforms_failed += 1
             print(f"Failed to post to {type(poster).__name__}: {exc}", file=sys.stderr)
 
     if platforms_failed == len(posters):
         return EXIT_NOTHING_POSTED
-    if games_missing or platforms_failed:
+    if games_missing or platforms_failed or platforms_degraded:
         return EXIT_PARTIAL
     return EXIT_OK
 

@@ -64,6 +64,37 @@ def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime
     return [periods[0]]
 
 
+def _forecast_hourly_url(points_payload: object) -> str:
+    if not isinstance(points_payload, dict):
+        kind = type(points_payload).__name__
+        raise ValueError(f"Unexpected NWS points response shape: expected object, got {kind}")
+    properties = points_payload.get("properties")
+    if not isinstance(properties, dict) or "forecastHourly" not in properties:
+        raise ValueError(
+            "Unexpected NWS points response shape: missing 'properties.forecastHourly'"
+        )
+    return properties["forecastHourly"]
+
+
+def _forecast_periods(forecast_payload: object) -> list[dict]:
+    if not isinstance(forecast_payload, dict):
+        kind = type(forecast_payload).__name__
+        raise ValueError(f"Unexpected NWS forecast response shape: expected object, got {kind}")
+    properties = forecast_payload.get("properties")
+    if not isinstance(properties, dict):
+        kind = type(properties).__name__
+        raise ValueError(
+            f"Unexpected NWS forecast response shape: expected 'properties' object, got {kind}"
+        )
+    periods = properties.get("periods")
+    if not isinstance(periods, list):
+        kind = type(periods).__name__
+        raise ValueError(
+            f"Unexpected NWS forecast response shape: expected 'periods' list, got {kind}"
+        )
+    return periods
+
+
 def _period_to_report(period: dict) -> WeatherReport:
     # NWS can report a null temperature/windSpeed for a period with missing data. A null
     # temperature stays None rather than becoming a fabricated 0°F extreme-cold reading;
@@ -101,10 +132,10 @@ def get_forecast(
         points_response = request_with_retry(
             lambda: _get(POINTS_URL.format(lat=latitude, lon=longitude))
         )
-        forecast_url = points_response.json()["properties"]["forecastHourly"]
+        forecast_url = _forecast_hourly_url(points_response.json())
 
         forecast_response = request_with_retry(lambda: _get(forecast_url))
-        periods = forecast_response.json()["properties"]["periods"]
+        periods = _forecast_periods(forecast_response.json())
     finally:
         if owns_client:
             http_client.close()

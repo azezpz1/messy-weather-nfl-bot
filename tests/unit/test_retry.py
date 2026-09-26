@@ -1,7 +1,10 @@
+import datetime as dt
+from email.utils import format_datetime
+
 import httpx
 import pytest
 
-from messy_weather_nfl_bot.retry import request_with_retry
+from messy_weather_nfl_bot.retry import _retry_after_seconds, request_with_retry
 
 URL = "https://example.test/thing"
 
@@ -12,8 +15,13 @@ def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
 
 
-def _response(status: int) -> httpx.Response:
-    return httpx.Response(status, request=httpx.Request("GET", URL))
+def _response(status: int, headers: dict[str, str] | None = None) -> httpx.Response:
+    return httpx.Response(status, headers=headers, request=httpx.Request("GET", URL))
+
+
+def _status_error(status: int, headers: dict[str, str] | None = None) -> httpx.HTTPStatusError:
+    response = _response(status, headers)
+    return httpx.HTTPStatusError(str(status), request=response.request, response=response)
 
 
 def _get_and_raise(response: httpx.Response) -> httpx.Response:
@@ -102,3 +110,64 @@ def test_reraises_the_last_connection_error_after_exhausting_retries() -> None:
     with pytest.raises(httpx.ConnectError):
         request_with_retry(request, max_attempts=3)
     assert attempts == 3
+
+
+def test_retry_after_seconds_parses_an_integer_delay() -> None:
+    exc = _status_error(429, {"Retry-After": "30"})
+    assert _retry_after_seconds(exc) == 30.0
+
+
+def test_retry_after_seconds_parses_an_http_date() -> None:
+    future = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=45)
+    exc = _status_error(429, {"Retry-After": format_datetime(future, usegmt=True)})
+
+    seconds = _retry_after_seconds(exc)
+
+    assert seconds is not None
+    assert 40 <= seconds <= 46
+
+
+def test_retry_after_seconds_is_none_without_the_header() -> None:
+    assert _retry_after_seconds(_status_error(429)) is None
+
+
+def test_retry_after_seconds_is_none_for_a_non_429_status() -> None:
+    assert _retry_after_seconds(_status_error(500, {"Retry-After": "30"})) is None
+
+
+def test_retry_after_seconds_is_none_for_an_unrelated_exception() -> None:
+    assert _retry_after_seconds(ValueError("nope")) is None
+
+
+def test_retry_after_seconds_is_none_for_an_unparseable_header() -> None:
+    assert _retry_after_seconds(_status_error(429, {"Retry-After": "not a date"})) is None
+
+
+def test_retry_after_seconds_treats_a_timezone_naive_date_as_utc() -> None:
+    # parsedate_to_datetime can return a naive datetime for a header with no offset -
+    # treat it as UTC rather than crashing or comparing naive/aware datetimes.
+    naive_header = (dt.datetime.now(dt.UTC) + dt.timedelta(seconds=45)).strftime(
+        "%a, %d %b %Y %H:%M:%S"
+    )
+    exc = _status_error(429, {"Retry-After": naive_header})
+
+    seconds = _retry_after_seconds(exc)
+
+    assert seconds is not None
+    assert 40 <= seconds <= 46
+
+
+def test_request_with_retry_sleeps_for_the_retry_after_header_on_a_429(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("tenacity.nap.time.sleep", sleeps.append)
+    responses = iter([_response(429, {"Retry-After": "5"}), _response(200)])
+
+    def request() -> httpx.Response:
+        return _get_and_raise(next(responses))
+
+    response = request_with_retry(request)
+
+    assert response.status_code == 200
+    assert sleeps == [5.0]

@@ -155,3 +155,38 @@ def test_one_poster_failing_still_lets_the_others_post(
     assert exit_code == EXIT_PARTIAL
     assert posted_texts  # the working poster still ran, despite the broken one raising
     assert "platform is down" in capsys.readouterr().err
+
+
+@respx.mock
+def test_a_partially_posted_thread_is_partial_not_nothing_posted(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    # If the root of a thread published before a later reply failed, the poster did
+    # publish something - that must not be reported as EXIT_NOTHING_POSTED.
+    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+
+    class FailsAfterRootPost(SocialMediaPoster):
+        def post(self, text: str) -> PostRef:
+            return PostRef(id="root", root_id="root")
+
+        def reply(self, text: str, parent: PostRef) -> PostRef:
+            raise RuntimeError("platform outage")
+
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_posters",
+        lambda platform_names, dry_run: [FailsAfterRootPost()],
+    )
+    # Force a multi-post thread (root + reply) regardless of formatting specifics -
+    # what's under test here is the poster/exit-code interaction, not chunking.
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_post_texts",
+        lambda ranked, date: ["root post", "reply post"],
+    )
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+
+    exit_code = run(platform_names=["bluesky"], dry_run=False)
+
+    assert exit_code == EXIT_PARTIAL
+    assert "Partially posted" in capsys.readouterr().err

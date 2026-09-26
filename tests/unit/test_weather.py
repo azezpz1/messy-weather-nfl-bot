@@ -205,3 +205,37 @@ def test_get_forecast_raises_after_persistent_5xx_from_nws() -> None:
 
     with pytest.raises(httpx.HTTPStatusError):
         get_forecast(LAT, LON, kickoff)
+
+
+@respx.mock
+def test_get_forecast_raises_a_clean_error_on_a_malformed_points_response() -> None:
+    # A 200 with an unexpected shape shouldn't crash with a raw KeyError - main.run's
+    # per-game handler only catches httpx.HTTPError and ValueError.
+    respx.get(f"https://api.weather.gov/points/{LAT},{LON}").mock(
+        return_value=httpx.Response(200, json={"properties": {}})
+    )
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+
+    with pytest.raises(ValueError, match="forecastHourly"):
+        get_forecast(LAT, LON, kickoff)
+
+
+@respx.mock
+def test_get_forecast_raises_a_clean_error_on_a_malformed_forecast_response() -> None:
+    respx.get(f"https://api.weather.gov/points/{LAT},{LON}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "properties": {
+                    "forecastHourly": "https://api.weather.gov/gridpoints/GRB/1,1/forecast/hourly"
+                }
+            },
+        )
+    )
+    respx.get("https://api.weather.gov/gridpoints/GRB/1,1/forecast/hourly").mock(
+        return_value=httpx.Response(200, json={"properties": {}})
+    )
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+
+    with pytest.raises(ValueError, match="periods"):
+        get_forecast(LAT, LON, kickoff)
