@@ -166,9 +166,8 @@ commits, and opens a `release/vX.Y.Z` pull request; merging that PR triggers
 release.
 
 **Known gap:** the release PR's CI run needs a manual approval. "Release
-(prepare)" opens the PR using the default `GITHUB_TOKEN`, which is what
-"Release (prepare)" uses to open the PR. GitHub puts the resulting
-`pull_request`-triggered CI run into an approval-required state — a user
+(prepare)" opens the PR using the default `GITHUB_TOKEN`. GitHub puts the
+resulting `pull_request`-triggered CI run into an approval-required state — a user
 with write access has to click "Approve and run" in the PR's merge box
 before it (and the integration tests) actually execute. This is distinct
 from the separate approval gate for PRs from forks or first-time
@@ -179,6 +178,16 @@ executed against it. Fixing this so CI runs automatically requires
 authenticating `gh pr create` with a GitHub App token or a fine-grained PAT
 (owned by a non-Actions identity) instead of `GITHUB_TOKEN`, which needs a
 repository secret to be provisioned by a maintainer.
+
+### Pre-commit hooks
+
+Optionally, install [pre-commit](https://pre-commit.com/) to run ruff (lint
+and format) and ty automatically before each commit:
+
+```sh
+uv tool install pre-commit --with pre-commit-uv
+pre-commit install
+```
 
 ### Code coverage
 
