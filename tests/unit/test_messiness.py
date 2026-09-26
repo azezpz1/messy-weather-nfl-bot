@@ -25,7 +25,7 @@ def make_game(home: str = "BUF", away: str = "MIA") -> Game:
 
 def make_weather(
     short_forecast: str = "Sunny",
-    temperature_f: int = 65,
+    temperature_f: int | None = 65,
     wind_speed_mph: float = 5.0,
     precipitation_probability: int | None = 0,
 ) -> WeatherReport:
@@ -86,16 +86,18 @@ def test_sort_by_messiness_snow_always_first_even_with_lower_score() -> None:
     # A mild snow game should still rank above a severe (but snow-less) storm.
     snow = evaluate_game(
         make_game("GB"),
-        make_weather(short_forecast="Light Snow", temperature_f=30, wind_speed_mph=2),
+        [make_weather(short_forecast="Light Snow", temperature_f=30, wind_speed_mph=2)],
     )
     storm = evaluate_game(
         make_game("KC"),
-        make_weather(
-            short_forecast="Thunderstorms",
-            wind_speed_mph=45,
-            temperature_f=95,
-            precipitation_probability=100,
-        ),
+        [
+            make_weather(
+                short_forecast="Thunderstorms",
+                wind_speed_mph=45,
+                temperature_f=95,
+                precipitation_probability=100,
+            )
+        ],
     )
     assert storm.score > snow.score
 
@@ -105,8 +107,79 @@ def test_sort_by_messiness_snow_always_first_even_with_lower_score() -> None:
 
 
 def test_sort_by_messiness_orders_non_snow_games_by_score_descending() -> None:
-    mild = evaluate_game(make_game("GB"), make_weather(short_forecast="Sunny"))
-    windy = evaluate_game(make_game("KC"), make_weather(short_forecast="Windy", wind_speed_mph=35))
+    mild = evaluate_game(make_game("GB"), [make_weather(short_forecast="Sunny")])
+    windy = evaluate_game(
+        make_game("KC"), [make_weather(short_forecast="Windy", wind_speed_mph=35)]
+    )
 
     ranked = sort_by_messiness([mild, windy])
     assert [gw.condition for gw in ranked] == [Condition.WIND, Condition.CLEAR]
+
+
+def test_evaluate_game_picks_the_messiest_period_not_the_first() -> None:
+    # Kickoff is calm, but the game turns messy later - evaluate_game must surface that
+    # worst moment rather than just reporting conditions at kickoff.
+    calm_at_kickoff = make_weather(short_forecast="Sunny", wind_speed_mph=2, temperature_f=65)
+    snow_later = make_weather(
+        short_forecast="Snow", wind_speed_mph=20, temperature_f=25, precipitation_probability=90
+    )
+
+    result = evaluate_game(make_game("GB"), [calm_at_kickoff, snow_later])
+
+    assert result.condition == Condition.SNOW
+    assert result.weather == snow_later
+
+
+def test_evaluate_game_flags_has_snow_even_when_a_later_period_scores_higher() -> None:
+    # Mild snow early, then a much stormier period that outscores it - the displayed
+    # report should be the messier storm, but has_snow must still reflect the snow.
+    mild_snow = make_weather(short_forecast="Light Snow", temperature_f=30, wind_speed_mph=2)
+    bigger_storm = make_weather(
+        short_forecast="Thunderstorms",
+        wind_speed_mph=45,
+        temperature_f=95,
+        precipitation_probability=100,
+    )
+
+    result = evaluate_game(make_game("GB"), [mild_snow, bigger_storm])
+
+    assert result.condition == Condition.THUNDERSTORM
+    assert result.has_snow is True
+
+
+def test_classify_condition_missing_temperature_is_not_extreme() -> None:
+    # A missing temperature must not be treated as a measured 0°F (extreme cold).
+    weather = make_weather(short_forecast="Sunny", temperature_f=None)
+    assert classify_condition(weather) == Condition.CLEAR
+
+
+def test_messiness_score_excludes_missing_temperature_from_extremity() -> None:
+    missing = make_weather(short_forecast="Sunny", temperature_f=None, wind_speed_mph=0)
+    calm_at_comfortable_temp = make_weather(
+        short_forecast="Sunny", temperature_f=65, wind_speed_mph=0
+    )
+    assert messiness_score(missing, classify_condition(missing)) == messiness_score(
+        calm_at_comfortable_temp, classify_condition(calm_at_comfortable_temp)
+    )
+
+
+def test_sort_by_messiness_keeps_snow_first_when_a_stormier_period_scores_higher() -> None:
+    # The game has snow at some point, but a later thunderstorm period scores higher and
+    # becomes the displayed condition - it must still rank ahead of a snow-less game.
+    mixed_snow_and_storm = evaluate_game(
+        make_game("GB"),
+        [
+            make_weather(short_forecast="Light Snow", temperature_f=30, wind_speed_mph=2),
+            make_weather(
+                short_forecast="Thunderstorms",
+                wind_speed_mph=45,
+                temperature_f=95,
+                precipitation_probability=100,
+            ),
+        ],
+    )
+    clear = evaluate_game(make_game("KC"), [make_weather(short_forecast="Sunny")])
+
+    ranked = sort_by_messiness([clear, mixed_snow_and_storm])
+
+    assert ranked[0] is mixed_snow_and_storm

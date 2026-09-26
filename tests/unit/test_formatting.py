@@ -11,7 +11,13 @@ from messy_weather_nfl_bot.weather import WeatherReport
 GAME_DATE = dt.date(2026, 1, 18)
 
 
-def make_game_weather(home: str, away: str, short_forecast: str, wind_speed_mph: float = 5.0):
+def make_game_weather(
+    home: str,
+    away: str,
+    short_forecast: str,
+    wind_speed_mph: float = 5.0,
+    temperature_f: int | None = 28,
+):
     game = Game(
         home_team=home,
         away_team=away,
@@ -20,11 +26,11 @@ def make_game_weather(home: str, away: str, short_forecast: str, wind_speed_mph:
     )
     weather = WeatherReport(
         short_forecast=short_forecast,
-        temperature_f=28,
+        temperature_f=temperature_f,
         wind_speed_mph=wind_speed_mph,
         precipitation_probability=60,
     )
-    return evaluate_game(game, weather)
+    return evaluate_game(game, [weather])
 
 
 def test_format_game_line_includes_teams_emoji_and_temperature() -> None:
@@ -38,6 +44,11 @@ def test_format_game_line_includes_teams_emoji_and_temperature() -> None:
 def test_format_game_line_omits_wind_when_calm() -> None:
     gw = make_game_weather("GB", "CHI", "Sunny", wind_speed_mph=0)
     assert "mph wind" not in format_game_line(gw)
+
+
+def test_format_game_line_omits_temperature_when_missing() -> None:
+    gw = make_game_weather("GB", "CHI", "Sunny", temperature_f=None)
+    assert "°F" not in format_game_line(gw)
 
 
 def test_format_game_line_includes_kickoff_time_in_eastern() -> None:
