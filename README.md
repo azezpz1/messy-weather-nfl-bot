@@ -77,25 +77,22 @@ pushes:
    auto-generated notes.
 
 Rather than tracking `main` directly, point a deployment (e.g. a Raspberry
-Pi) at the latest tag instead:
+Pi) at the latest tag instead, using `scripts/update-to-latest-release.sh`:
 
 ```sh
 cd /path/to/messy-weather-nfl-bot
-repo=$(git remote get-url origin | sed -E 's#^.*[:/]([^/]+/[^/]+)$#\1#; s#\.git$##')
-latest_tag=$(curl -fsSL "https://api.github.com/repos/$repo/releases/latest" \
-  | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
-git fetch --tags
-git checkout "$latest_tag"
-uv sync
+./scripts/update-to-latest-release.sh
 ```
 
 This asks GitHub for the latest *published* release rather than just the
 newest tag, since a repo could in principle have tags that were never turned
-into a release.
+into a release, then checks out that tag and runs `uv sync`.
 
-Run that before your scheduled job (e.g. as the first line of the wrapper
+Run it before your scheduled job (e.g. as the first line of the wrapper
 script your crontab invokes) to stay on the latest release without ever
-checking out unreleased commits from `main`.
+checking out unreleased commits from `main`. If you're hitting GitHub's
+unauthenticated API rate limit, set a `GITHUB_TOKEN` env var (no special
+permissions needed) and the script will use it.
 
 ## Development
 
